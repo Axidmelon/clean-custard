@@ -4,6 +4,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime
 
+
 # --- Schema for creating a user (INPUT) ---
 class UserCreate(BaseModel):
     email: EmailStr
@@ -12,16 +13,19 @@ class UserCreate(BaseModel):
     last_name: str = ""
     organization_id: uuid.UUID
 
+
 # --- Schema for user login (INPUT) ---
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
 
 # --- Base schema for a user (shared properties) ---
 class UserBase(BaseModel):
     email: str
     is_verified: bool
     organization_id: uuid.UUID
+
 
 # --- Main schema for a user (OUTPUT) ---
 # This is the full model that we will send back to the user.
@@ -32,11 +36,12 @@ class User(UserBase):
     last_name: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
+
     class Config:
         # This tells Pydantic to read the data even if it's not a dict,
         # but a SQLAlchemy model object.
         from_attributes = True
+
 
 # --- Schema for user response (without sensitive data) ---
 class UserResponse(BaseModel):
@@ -48,6 +53,6 @@ class UserResponse(BaseModel):
     organization_id: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True

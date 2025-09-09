@@ -63,14 +63,15 @@ def run_migrations_online() -> None:
     """
     # Get database URL from environment variable
     import os
-    database_url = os.getenv('DATABASE_URL')
+
+    database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise ValueError("DATABASE_URL environment variable is not set")
-    
+
     # Override the sqlalchemy.url in the config
     configuration = config.get_section(config.config_ini_section, {})
-    configuration['sqlalchemy.url'] = database_url
-    
+    configuration["sqlalchemy.url"] = database_url
+
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
@@ -78,9 +79,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

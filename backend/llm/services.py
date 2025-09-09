@@ -3,6 +3,7 @@
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 
+
 # We are creating a 'class' here. Think of it as a blueprint
 # for a specialized "Text-to-SQL Converter" tool.
 class TextToSQLService:
@@ -48,7 +49,6 @@ SQL Query:
         self.chain = self.prompt | self.llm
         print("TextToSQLService initialized successfully.")
 
-
     def generate_sql(self, question: str, schema: str) -> str:
         """
         Takes a user's question and a database schema, and returns a SQL query.
@@ -64,12 +64,9 @@ SQL Query:
 
         # We "invoke" the chain, passing in the specific data for this request.
         # The .content attribute contains the AI's final text response.
-        response = self.chain.invoke({
-            "schema": schema,
-            "question": question
-        })
+        response = self.chain.invoke({"schema": schema, "question": question})
 
         generated_sql = response.content
         print(f"Generated SQL: {generated_sql}")
-        
+
         return generated_sql

@@ -8,13 +8,14 @@ load_dotenv()
 # Initialize the Resend client with your API key
 resend.api_key = os.getenv("RESEND_API_KEY")
 
+
 def send_verification_email(to_email: str, verification_link: str):
     """
     Sends a welcome and email verification email to a new user.
     """
     try:
         params = {
-            "from": "onboarding@forgreco.com", 
+            "from": "onboarding@forgreco.com",
             "to": [to_email],
             "subject": "Welcome to Custard! Please Verify Your Email",
             "html": f"""
@@ -34,13 +35,14 @@ def send_verification_email(to_email: str, verification_link: str):
         print(f"Error sending verification email: {e}")
         return None
 
+
 def send_password_reset_email(to_email: str, reset_link: str):
     """
     Sends a password reset email to a user.
     """
     try:
         params = {
-            "from": "support@forgreco.com", # <-- Use a support address
+            "from": "support@forgreco.com",  # <-- Use a support address
             "to": [to_email],
             "subject": "Custard Account: Password Reset Request",
             "html": f"""

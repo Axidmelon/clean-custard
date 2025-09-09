@@ -1,12 +1,13 @@
 # File: backend/api/v1/endpoints/websocket.py
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from ws.connection_manager import manager # Import our global manager
+from ws.connection_manager import manager  # Import our global manager
 
 router = APIRouter()
 
 # ... (imports) ...
 import json
+
 
 @router.websocket("/connections/ws/{agent_id}")
 async def websocket_endpoint(websocket: WebSocket, agent_id: str):

@@ -4,6 +4,7 @@ import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGrou
 import { useSidebar } from "@/components/ui/sidebar-hooks";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/auth-hooks";
+import { User as UserType } from "@/contexts/auth-constants";
 const navigationItems = [{
   title: "Dashboard",
   url: "/",
@@ -31,7 +32,7 @@ export function AppSidebar() {
     open,
     setOpen
   } = sidebarContext as { open: boolean; setOpen: (open: boolean) => void };
-  const { user } = authContext as { user: any };
+  const { user } = authContext as { user: UserType | null };
   const currentPath = location.pathname;
   const isActive = (path: string) => {
     if (path === "/") return currentPath === "/";

@@ -33,7 +33,7 @@ engine = create_engine(
     pool_timeout=DB_POOL_TIMEOUT,
     pool_recycle=DB_POOL_RECYCLE,
     pool_pre_ping=True,  # Verify connections before use
-    echo=os.getenv("DEBUG", "false").lower() == "true"
+    echo=os.getenv("DEBUG", "false").lower() == "true",
 )
 
 # A SessionLocal class is a factory for creating new database sessions.
@@ -41,6 +41,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # We get the Base class from here now, which our models will inherit.
 Base = declarative_base()
+
 
 # Add connection event listeners for monitoring
 @event.listens_for(engine, "connect")
@@ -58,10 +59,12 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor.execute("SET timezone TO 'UTC'")
         cursor.close()
 
+
 @event.listens_for(engine, "checkout")
 def receive_checkout(dbapi_connection, connection_record, connection_proxy):
     """Log database connection checkout."""
     logger.debug("Database connection checked out")
+
 
 @event.listens_for(engine, "checkin")
 def receive_checkin(dbapi_connection, connection_record):

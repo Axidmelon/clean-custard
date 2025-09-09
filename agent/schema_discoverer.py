@@ -3,14 +3,15 @@
 import os
 import psycopg2
 from dotenv import load_dotenv
-from typing import Dict, List, Any
+from typing import Dict, Any
 
 class SchemaDiscoverer:
     """
     A tool to connect to a PostgreSQL database and discover its schema.
     """
 
-    def __init__(self, host, port, dbname, user, password, schema_name="public", table_filter=None):
+    def __init__(self, host, port, dbname, user, password,
+                 schema_name="public", table_filter=None):
         """Initializes the discoverer with database connection details."""
         self.db_params = {
             "host": host,
@@ -25,7 +26,7 @@ class SchemaDiscoverer:
     def _build_schema_query(self) -> str:
         """
         Build the schema discovery query based on configuration.
-        
+
         Returns:
             SQL query string for schema discovery
         """
@@ -35,7 +36,7 @@ class SchemaDiscoverer:
         FROM information_schema.columns
         WHERE table_schema = %s
         """
-        
+
         # Add table filter if specified
         if self.table_filter:
             query += " AND table_name IN %s"
@@ -85,13 +86,13 @@ class SchemaDiscoverer:
 # --- This block is for direct testing of this file ---
 if __name__ == '__main__':
     load_dotenv()
-    
+
     # Get configuration from environment variables
     schema_name = os.getenv("SCHEMA_NAME", "public")
     table_filter = os.getenv("TABLE_FILTER")
     if table_filter:
         table_filter = [table.strip() for table in table_filter.split(",")]
-    
+
     discoverer = SchemaDiscoverer(
         host=os.getenv("DB_HOST"),
         port=os.getenv("DB_PORT"),
