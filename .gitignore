@@ -132,6 +132,7 @@ Thumbs.db
 build/
 dist/
 out/
+.vite/
 
 # Docker
 .dockerignore
