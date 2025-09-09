@@ -11,16 +11,36 @@ import json
 
 @router.websocket("/connections/ws/{agent_id}")
 async def websocket_endpoint(websocket: WebSocket, agent_id: str):
-    await manager.connect(agent_id, websocket)
+    """
+    WebSocket endpoint for agent connections.
+
+    This endpoint handles:
+    - Agent connection establishment
+    - Message routing and processing
+    - Connection cleanup on disconnect
+
+    Args:
+        websocket: WebSocket connection object
+        agent_id: Unique identifier for the agent
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"WebSocket connection attempt from agent: {agent_id}")
+
     try:
-        # This loop now actively listens for responses from the agent.
-        while True:
-            response_str = await websocket.receive_text()
-            response_data = json.loads(response_str)
-            query_id = response_data.get("query_id")
-            if query_id:
-                print(f"<<< Received response for query_id '{query_id}' from agent '{agent_id}'")
-                # Pass the response to the manager to be handled.
-                manager.handle_response(query_id, response_data)
+        # Accept the connection
+        await manager.connect(agent_id, websocket)
+
+        # Listen for messages from the agent
+        await manager.listen_for_messages(agent_id)
+
     except WebSocketDisconnect:
+        logger.info(f"Agent {agent_id} disconnected")
         manager.disconnect(agent_id)
+    except Exception as e:
+        logger.error(f"Error in WebSocket connection for agent {agent_id}: {e}")
+        manager.disconnect(agent_id)
+    finally:
+        # Ensure cleanup
+        if manager.is_agent_connected(agent_id):
+            manager.disconnect(agent_id)
