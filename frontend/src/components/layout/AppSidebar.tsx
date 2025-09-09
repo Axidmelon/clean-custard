@@ -1,7 +1,6 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { BarChart3, MessageSquare, Plug, Settings, ChevronLeft, ChevronRight, User } from "lucide-react";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, SidebarFooter } from "@/components/ui/sidebar";
-import { useSidebar } from "@/components/ui/sidebar-hooks";
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, SidebarFooter, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/auth-hooks";
 import { User as UserType } from "@/contexts/auth-constants";

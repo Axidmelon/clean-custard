@@ -26,6 +26,15 @@ import {
 } from "./sidebar-constants"
 import { SidebarContext } from "./sidebar-context"
 
+// Hook to use sidebar context
+export const useSidebar = () => {
+  const context = React.useContext(SidebarContext)
+  if (!context) {
+    throw new Error("useSidebar must be used within a SidebarProvider")
+  }
+  return context
+}
+
 const SidebarProvider = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div"> & {
@@ -104,6 +113,8 @@ const SidebarProvider = React.forwardRef<
         openMobile,
         setOpenMobile,
         toggleSidebar,
+        openSidebar: () => setOpen(true),
+        closeSidebar: () => setOpen(false),
       }),
       [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
     )
