@@ -1,0 +1,73 @@
+services:
+  custard-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    container_name: custard-backend-local
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - ENABLE_DOCS=false
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://custard:password@postgres:5432/custard_db
+      - SECRET_KEY=test-secret-key-for-local-testing
+      - OPENAI_API_KEY=sk-test-key
+      - RESEND_API_KEY=re_test-key
+      - FROM_EMAIL=test@example.com
+      - ALLOWED_ORIGINS=https://example.com,https://test.example.com
+      - FRONTEND_URL=https://example.com
+      - SENTRY_DSN=https://test-sentry-dsn@sentry.io/test
+      - RATE_LIMIT_REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - custard-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: custard-postgres-local
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=custard_db
+      - POSTGRES_USER=custard
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data_local:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U custard -d custard_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - custard-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: custard-redis-local
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data_local:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - custard-network
+
+volumes:
+  postgres_data_local:
+  redis_data_local:
+
+networks:
+  custard-network:
+    driver: bridge
