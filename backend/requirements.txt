@@ -10,7 +10,7 @@ psycopg2-binary==2.9.10
 # Authentication and security
 python-jose==3.3.0
 passlib==1.7.4
-bcrypt
+bcrypt==4.0.1
 python-multipart==0.0.20
 
 # Environment and configuration
