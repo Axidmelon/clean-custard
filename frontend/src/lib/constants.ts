@@ -52,6 +52,12 @@ export const APP_CONFIG = {
     MONGODB: "https://docs.atlas.mongodb.com/security-add-mongodb-users/",
     MYSQL: "https://dev.mysql.com/doc/refman/8.0/en/creating-accounts.html",
   },
+  
+  // Docker configuration
+  DOCKER: {
+    IMAGE_NAME: "custardagent/custard-agent:latest",
+    BACKEND_URL: "wss://clean-custard-backend-production.up.railway.app",
+  },
 } as const;
 
 // Environment configuration

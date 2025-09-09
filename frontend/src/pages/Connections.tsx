@@ -293,7 +293,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   const handleCopyCommand = async () => {
     const apiKey = generatedApiKey || APP_CONFIG.DEFAULT_API_KEY_PLACEHOLDER;
     const agentId = generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
-    const websocketUrl = generatedWebsocketUrl || `ws://localhost:8000/api/v1/connections/ws/${agentId}`;
+    const websocketUrl = generatedWebsocketUrl || `${APP_CONFIG.DOCKER.BACKEND_URL}/api/v1/connections/ws/${agentId}`;
     
     // Log the values being used for debugging
     logDebug('Generated API key state:', generatedApiKey);
@@ -311,8 +311,8 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   -e DB_PORT="YOUR_DB_PORT" \\
   -e DB_USER="YOUR_READONLY_USER" \\
   -e DB_PASSWORD="YOUR_DB_PASSWORD" \\
-  -e DB_NAME="postgres" \\
-  custard/agent:latest`;
+  -e DB_NAME="YOUR_DATABASE_NAME" \\
+  ${APP_CONFIG.DOCKER.IMAGE_NAME}`;
     
     try {
       await navigator.clipboard.writeText(command);
