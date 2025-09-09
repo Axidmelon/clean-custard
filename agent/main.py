@@ -71,7 +71,8 @@ def is_readonly_query(sql_query: str) -> bool:
     # Block dangerous keywords - configurable via environment variable
     dangerous_keywords_str = os.getenv(
         "DANGEROUS_KEYWORDS",
-        "drop,delete,insert,update,alter,create,truncate,grant,revoke,exec,execute,sp_,xp_,--,/*,*/",
+        "drop,delete,insert,update,alter,create,truncate,grant,revoke,exec,execute,"
+        "sp_,xp_,--,/*,*/",
     )
     dangerous_keywords = [keyword.strip() for keyword in dangerous_keywords_str.split(",")]
 

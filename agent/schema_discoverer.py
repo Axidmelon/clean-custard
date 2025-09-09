@@ -5,6 +5,7 @@ import psycopg2
 from dotenv import load_dotenv
 from typing import Dict, Any
 
+
 class SchemaDiscoverer:
     """
     A tool to connect to a PostgreSQL database and discover its schema.
@@ -44,7 +45,7 @@ class SchemaDiscoverer:
         else:
             return query + " ORDER BY table_name, ordinal_position;"
 
-    def discover_schema(self) -> Dict[str, Any]: # <-- CHANGE 1: Return type is now a dictionary
+    def discover_schema(self) -> Dict[str, Any]:  # <-- CHANGE 1: Return type is now a dictionary
         """
         Connects to the database and returns a structured dictionary of the schema.
         """
@@ -62,13 +63,14 @@ class SchemaDiscoverer:
                         cursor.execute(query, (self.schema_name,))
                     results = cursor.fetchall()
             print("Successfully fetched schema information.")
-            return self._format_schema_as_dict(results) # <-- CHANGE 2: Call the new formatting function
+            # <-- CHANGE 2: Call the new formatting function
+            return self._format_schema_as_dict(results)
         except psycopg2.Error as e:
             print(f"ERROR: Could not connect to the database. {e}")
             # Raise an exception so the caller can handle it
             raise ConnectionError(f"Could not connect to the database: {e}")
 
-    def _format_schema_as_dict(self, results: list) -> Dict[str, Any]: # <-- CHANGE 3: New function
+    def _format_schema_as_dict(self, results: list) -> Dict[str, Any]:  # <-- CHANGE 3: New function
         """
         Private helper method to format the raw schema into a dictionary.
         This is perfect for converting to JSON.
@@ -82,6 +84,7 @@ class SchemaDiscoverer:
                 "type": data_type.upper()
             })
         return tables
+
 
 # --- This block is for direct testing of this file ---
 if __name__ == '__main__':
