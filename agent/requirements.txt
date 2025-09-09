@@ -1,0 +1,9 @@
+# Custard Agent Dependencies
+# Core WebSocket communication
+websockets==15.0.1
+
+# PostgreSQL database connectivity
+psycopg2-binary==2.9.10
+
+# Environment variable management
+python-dotenv==1.1.1
