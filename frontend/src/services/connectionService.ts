@@ -8,7 +8,21 @@ import {
   SchemaRefreshResponse,
   ApiError
 } from '@/types/api';
-import { APP_CONFIG, getApiBaseUrl } from '@/lib/constants';
+import { getApiBaseUrl } from '@/lib/constants';
+
+// Helper function to get authentication headers
+const getAuthHeaders = (): HeadersInit => {
+  const token = localStorage.getItem('access_token');
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  return headers;
+};
 
 const handleResponse = async <T>(response: Response): Promise<T> => {
   if (!response.ok) {
@@ -24,9 +38,7 @@ const handleResponse = async <T>(response: Response): Promise<T> => {
 const getConnections = async (): Promise<Connection[]> => {
   const response = await fetch(`${getApiBaseUrl()}/connections`, {
     method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
   });
   return handleResponse<Connection[]>(response);
 };
@@ -34,9 +46,7 @@ const getConnections = async (): Promise<Connection[]> => {
 const getConnection = async (connectionId: string): Promise<Connection> => {
   const response = await fetch(`${getApiBaseUrl()}/connections/${connectionId}`, {
     method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
   });
   return handleResponse<Connection>(response);
 };
@@ -44,9 +54,7 @@ const getConnection = async (connectionId: string): Promise<Connection> => {
 const createConnection = async (connectionData: CreateConnectionRequest): Promise<Connection> => {
   const response = await fetch(`${getApiBaseUrl()}/connections`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify(connectionData),
   });
   return handleResponse<Connection>(response);
@@ -55,9 +63,7 @@ const createConnection = async (connectionData: CreateConnectionRequest): Promis
 const deleteConnection = async (connectionId: string): Promise<void> => {
   const response = await fetch(`${getApiBaseUrl()}/connections/${connectionId}`, {
     method: 'DELETE',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
   });
   
   if (!response.ok) {
@@ -72,9 +78,7 @@ const deleteConnection = async (connectionId: string): Promise<void> => {
 const getConnectionStatus = async (connectionId: string): Promise<ConnectionStatus> => {
   const response = await fetch(`${getApiBaseUrl()}/connections/${connectionId}/status`, {
     method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
   });
   return handleResponse<ConnectionStatus>(response);
 };
@@ -82,9 +86,7 @@ const getConnectionStatus = async (connectionId: string): Promise<ConnectionStat
 const refreshSchema = async (connectionId: string, agentId: string): Promise<SchemaRefreshResponse> => {
   const response = await fetch(`${getApiBaseUrl()}/connections/${connectionId}/refresh-schema`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ agent_id: agentId } as SchemaRefreshRequest),
   });
   return handleResponse<SchemaRefreshResponse>(response);

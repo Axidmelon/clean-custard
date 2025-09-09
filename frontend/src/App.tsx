@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { AppLayout } from "./components/layout/AppLayout";
-import ErrorBoundary from "./components/ErrorBoundary";
+import ErrorBoundary from "./components/ErrorBoundaryWrapper";
+import { globalErrorHandler } from "./lib/errorHandler";
 import Dashboard from "./pages/Dashboard";
 import TalkData from "./pages/TalkData";
 import Connections from "./pages/Connections";
@@ -21,7 +22,14 @@ const queryClient = new QueryClient();
 
 const App = () => {
   return (
-    <ErrorBoundary>
+    <ErrorBoundary 
+      onError={(error, errorInfo) => {
+        globalErrorHandler.reportError(error, { 
+          componentStack: errorInfo.componentStack,
+          errorBoundary: 'App'
+        });
+      }}
+    >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthProvider>

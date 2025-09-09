@@ -1,36 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-
-interface User {
-  id: string;
-  email: string;
-  first_name?: string;
-  last_name?: string;
-  is_verified: boolean;
-}
-
-interface AuthContextType {
-  user: User | null;
-  token: string | null;
-  login: (user: User, token: string) => void;
-  logout: () => void;
-  updateUser: (userData: Partial<User>) => void;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
-
-interface AuthProviderProps {
-  children: ReactNode;
-}
+import React, { useState, useEffect } from 'react';
+import { getStoredToken, getStoredTokenData, storeToken, clearStoredToken, isTokenExpired } from '@/lib/tokenUtils';
+import { logError, logDebug } from '@/lib/logger';
+import { User, AuthContextType, AuthProviderProps } from './auth-constants';
+import { AuthContext } from './auth-context';
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -39,31 +11,56 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     // Check for stored auth data on app load
-    const storedToken = localStorage.getItem('access_token');
-    const storedUser = localStorage.getItem('user');
+    const initializeAuth = async () => {
+      try {
+        const storedToken = getStoredToken();
+        const storedUser = localStorage.getItem('user');
+        
+        if (storedToken && storedUser) {
+          const parsedUser = JSON.parse(storedUser);
+          
+          // Verify token is still valid
+          if (!isTokenExpired(storedToken)) {
+            setToken(storedToken);
+            setUser(parsedUser);
+            logDebug('User authenticated from stored token');
+          } else {
+            logDebug('Stored token expired, clearing auth data');
+            clearStoredToken();
+            localStorage.removeItem('user');
+          }
+        }
+      } catch (error) {
+        logError('Failed to initialize auth', error);
+        clearStoredToken();
+        localStorage.removeItem('user');
+      } finally {
+        setIsLoading(false);
+      }
+    };
     
-    if (storedToken && storedUser) {
-      const parsedUser = JSON.parse(storedUser);
-      setToken(storedToken);
-      setUser(parsedUser);
-    }
-    
-    // Mark loading as complete
-    setIsLoading(false);
+    initializeAuth();
   }, []);
 
   const login = (userData: User, authToken: string) => {
-    setUser(userData);
-    setToken(authToken);
-    localStorage.setItem('access_token', authToken);
-    localStorage.setItem('user', JSON.stringify(userData));
+    try {
+      setUser(userData);
+      setToken(authToken);
+      storeToken(authToken);
+      localStorage.setItem('user', JSON.stringify(userData));
+      logDebug('User logged in successfully', { userId: userData.id });
+    } catch (error) {
+      logError('Failed to store token during login', error);
+      throw error;
+    }
   };
 
   const logout = () => {
     setUser(null);
     setToken(null);
-    localStorage.removeItem('access_token');
+    clearStoredToken();
     localStorage.removeItem('user');
+    logDebug('User logged out');
   };
 
   const updateUser = (userData: Partial<User>) => {
@@ -71,6 +68,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const updatedUser = { ...user, ...userData };
       setUser(updatedUser);
       localStorage.setItem('user', JSON.stringify(updatedUser));
+      logDebug('User data updated', { userId: user.id });
+    }
+  };
+
+  const refreshToken = async (): Promise<boolean> => {
+    try {
+      const currentToken = getStoredToken();
+      if (!currentToken) {
+        logDebug('No token to refresh');
+        return false;
+      }
+
+      // For now, we'll just validate the current token
+      // In a real implementation, you'd call a refresh endpoint
+      if (isTokenExpired(currentToken)) {
+        logDebug('Token is expired, user needs to re-login');
+        logout();
+        return false;
+      }
+
+      logDebug('Token is still valid');
+      return true;
+    } catch (error) {
+      logError('Failed to refresh token', error);
+      return false;
     }
   };
 
@@ -84,6 +106,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     updateUser,
     isAuthenticated,
     isLoading,
+    refreshToken,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

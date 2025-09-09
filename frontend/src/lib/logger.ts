@@ -17,39 +17,39 @@ class Logger {
     return isDebugMode();
   }
 
-  debug(message: string, ...args: any[]): void {
+  debug(message: string, ...args: unknown[]): void {
     if (this.shouldLog(LogLevel.DEBUG)) {
       console.log(`[DEBUG] ${message}`, ...args);
     }
   }
 
-  info(message: string, ...args: any[]): void {
+  info(message: string, ...args: unknown[]): void {
     if (this.shouldLog(LogLevel.INFO)) {
       console.log(`[INFO] ${message}`, ...args);
     }
   }
 
-  warn(message: string, ...args: any[]): void {
+  warn(message: string, ...args: unknown[]): void {
     if (this.shouldLog(LogLevel.WARN)) {
       console.warn(`[WARN] ${message}`, ...args);
     }
   }
 
-  error(message: string, error?: Error | any, ...args: any[]): void {
+  error(message: string, error?: Error | unknown, ...args: unknown[]): void {
     if (this.shouldLog(LogLevel.ERROR)) {
       console.error(`[ERROR] ${message}`, error, ...args);
     }
   }
 
   // Special method for API responses (only in development)
-  apiResponse(message: string, data: any): void {
+  apiResponse(message: string, data: unknown): void {
     if (this.shouldLog(LogLevel.DEBUG)) {
       console.log(`[API] ${message}`, data);
     }
   }
 
   // Special method for user actions (only in development)
-  userAction(action: string, details?: any): void {
+  userAction(action: string, details?: unknown): void {
     if (this.shouldLog(LogLevel.DEBUG)) {
       console.log(`[USER] ${action}`, details);
     }
@@ -60,18 +60,18 @@ class Logger {
 export const logger = new Logger();
 
 // Convenience functions for common use cases
-export const logApiResponse = (endpoint: string, response: any) => {
+export const logApiResponse = (endpoint: string, response: unknown) => {
   logger.apiResponse(`${endpoint} response:`, response);
 };
 
-export const logUserAction = (action: string, details?: any) => {
+export const logUserAction = (action: string, details?: unknown) => {
   logger.userAction(action, details);
 };
 
-export const logError = (context: string, error: Error | any) => {
+export const logError = (context: string, error: Error | unknown) => {
   logger.error(`${context}:`, error);
 };
 
-export const logDebug = (message: string, ...args: any[]) => {
+export const logDebug = (message: string, ...args: unknown[]) => {
   logger.debug(message, ...args);
 };

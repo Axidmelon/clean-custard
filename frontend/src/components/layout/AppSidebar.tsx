@@ -1,8 +1,9 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { BarChart3, MessageSquare, Plug, Settings, ChevronLeft, ChevronRight, User } from "lucide-react";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger, useSidebar, SidebarHeader, SidebarFooter } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger, SidebarHeader, SidebarFooter } from "@/components/ui/sidebar";
+import { useSidebar } from "@/components/ui/sidebar-hooks";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/auth-hooks";
 const navigationItems = [{
   title: "Dashboard",
   url: "/",

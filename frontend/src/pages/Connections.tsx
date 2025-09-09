@@ -78,6 +78,40 @@ const databaseTemplates: DatabaseTemplate[] = [
 
 
 
+// Helper function to get database user creation commands
+const getDatabaseUserCommands = (dbType: string): string => {
+  switch (dbType) {
+    case 'SUPABASE':
+      return `-- PostgreSQL (Supabase)
+CREATE USER custard_agent WITH PASSWORD 'secure_password';
+GRANT CONNECT ON DATABASE your_database TO custard_agent;
+GRANT USAGE ON SCHEMA public TO custard_agent;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO custard_agent;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO custard_agent;`;
+    case 'MYSQL':
+      return `-- MySQL
+CREATE USER 'custard_agent'@'%' IDENTIFIED BY 'secure_password';
+GRANT SELECT ON your_database.* TO 'custard_agent'@'%';
+FLUSH PRIVILEGES;`;
+    case 'MONGODB':
+      return `// MongoDB
+use admin
+db.createUser({
+  user: "custard_agent",
+  pwd: "secure_password",
+  roles: [{ role: "read", db: "your_database" }]
+})`;
+    case 'SNOWFLAKE':
+      return `-- Snowflake
+CREATE USER custard_agent PASSWORD='secure_password';
+GRANT ROLE PUBLIC TO USER custard_agent;
+GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE PUBLIC;`;
+    default:
+      return `-- Create read-only user for ${dbType}
+-- Replace with your database-specific commands`;
+  }
+};
+
 // Database credential form fields configuration
 const getCredentialFields = (dbType: string): { field: keyof DatabaseCredentials; label: string; type: string; placeholder: string; required: boolean }[] => {
   switch (dbType) {
@@ -364,6 +398,92 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
             </div>
           </div>
 
+          {/* Setup Requirements */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-gray-900">⚠️ Setup Requirements</h4>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-start space-x-3">
+                <div className="w-5 h-5 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <AlertCircle className="w-3 h-3 text-yellow-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-yellow-800 font-medium mb-2">Docker Command Alone is NOT Sufficient</p>
+                  <div className="text-xs text-yellow-700 space-y-1">
+                    <p>Before running the command below, you must:</p>
+                    <ul className="list-disc list-inside space-y-1 ml-2">
+                      <li>Configure your firewall to allow outbound HTTPS (port 443)</li>
+                      <li>Create a read-only database user</li>
+                      <li>Ensure database accessibility from Docker</li>
+                      <li>Test network connectivity</li>
+                    </ul>
+                    <a 
+                      href="/docs/agent-deployment" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-yellow-600 hover:text-yellow-800 underline font-medium"
+                    >
+                      View complete setup guide →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Database User Setup */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-gray-900">Create Read-Only Database User</h4>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start space-x-3">
+                <div className="w-5 h-5 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <AlertCircle className="w-3 h-3 text-red-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-red-800 font-medium mb-2">CRITICAL: Create Read-Only User</p>
+                  <div className="text-xs text-red-700 space-y-2">
+                    <p>Never use admin/root database users. Create a dedicated read-only user:</p>
+                    <details className="group">
+                      <summary className="cursor-pointer font-medium group-open:text-red-900">
+                        Show {databaseTemplate.name} commands
+                      </summary>
+                      <div className="mt-2 bg-red-100 p-2 rounded">
+                        <pre className="text-xs whitespace-pre-wrap">
+{getDatabaseUserCommands(databaseTemplate.db_type)}
+                        </pre>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Tests */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-gray-900">Quick Tests</h4>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <details className="group">
+                <summary className="cursor-pointer text-sm text-gray-700 font-medium group-open:text-gray-900">
+                  Test connectivity before deployment
+                </summary>
+                <div className="mt-3 space-y-2">
+                  <div className="text-xs text-gray-600">
+                    <p className="font-medium mb-1">Test internet access:</p>
+                    <code className="bg-gray-100 px-2 py-1 rounded text-xs">docker run --rm alpine ping -c 3 8.8.8.8</code>
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    <p className="font-medium mb-1">Test backend connectivity:</p>
+                    <code className="bg-gray-100 px-2 py-1 rounded text-xs">curl -I https://your-backend.railway.app/health</code>
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    <p className="font-medium mb-1">Test database connectivity:</p>
+                    <code className="bg-gray-100 px-2 py-1 rounded text-xs">docker run --rm postgres:15-alpine pg_isready -h YOUR_DB_HOST -p 5432</code>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+
           {/* Help Section */}
           <div className="space-y-3">
             <h4 className="text-sm font-semibold text-gray-900">{helpInfo.title}</h4>
@@ -397,15 +517,30 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
         {/* Right Panel - Command Snippet */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-gray-900">Generated Command</h4>
-            <Button 
-              size="sm" 
-              variant="outline" 
-              className="text-gray-600 border-gray-300 hover:bg-gray-50"
-              onClick={handleCopyCommand}
-            >
-              Copy
-            </Button>
+            <div>
+              <h4 className="text-sm font-semibold text-gray-900">Generated Command</h4>
+              <p className="text-xs text-gray-500 mt-1">
+                ⚠️ Complete setup requirements first
+              </p>
+            </div>
+            <div className="flex space-x-2">
+              <Button 
+                size="sm" 
+                variant="outline" 
+                className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                onClick={() => window.open('/docs/agent-deployment', '_blank')}
+              >
+                Setup Guide
+              </Button>
+              <Button 
+                size="sm" 
+                variant="outline" 
+                className="text-gray-600 border-gray-300 hover:bg-gray-50"
+                onClick={handleCopyCommand}
+              >
+                Copy
+              </Button>
+            </div>
           </div>
           
           <div className="bg-gray-900 text-gray-100 rounded-lg border overflow-hidden">
@@ -437,6 +572,23 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
             <p>• Run this command in your server environment</p>
             <p>• Ensure Docker is installed and running</p>
             <p>• Replace placeholder values with your actual credentials</p>
+          </div>
+          
+          {/* Post-Deployment Verification */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-gray-900">After Running the Command</h4>
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div className="text-xs text-green-700 space-y-1">
+                <p className="font-medium">Check these logs for success:</p>
+                <code className="bg-green-100 px-2 py-1 rounded text-xs block">
+                  ✅ Successfully connected to Custard backend
+                </code>
+                <code className="bg-green-100 px-2 py-1 rounded text-xs block">
+                  Database schema discovery completed
+                </code>
+                <p className="mt-2">Then verify connection status in your dashboard.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

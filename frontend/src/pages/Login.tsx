@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Link, useNavigate } from "react-router-dom";
 import { BarChart3, Eye, EyeOff, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/auth-hooks";
 import { getApiBaseUrl, APP_CONFIG } from "@/lib/constants";
 import { logUserAction, logError } from "@/lib/logger";
 import {
