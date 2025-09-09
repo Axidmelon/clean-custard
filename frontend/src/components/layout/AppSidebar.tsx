@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { BarChart3, MessageSquare, Plug, Settings, ChevronLeft, ChevronRight, User } from "lucide-react";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger, SidebarHeader, SidebarFooter } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, SidebarFooter } from "@/components/ui/sidebar";
 import { useSidebar } from "@/components/ui/sidebar-hooks";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/auth-hooks";
@@ -18,12 +18,20 @@ const navigationItems = [{
   icon: Plug
 }];
 export function AppSidebar() {
+  const sidebarContext = useSidebar();
+  const location = useLocation();
+  const authContext = useAuth();
+  
+  // Safety check to prevent useSidebar error
+  if (!sidebarContext || !authContext) {
+    return null;
+  }
+  
   const {
     open,
     setOpen
-  } = useSidebar();
-  const location = useLocation();
-  const { user } = useAuth();
+  } = sidebarContext as { open: boolean; setOpen: (open: boolean) => void };
+  const { user } = authContext as { user: any };
   const currentPath = location.pathname;
   const isActive = (path: string) => {
     if (path === "/") return currentPath === "/";

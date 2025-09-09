@@ -154,7 +154,25 @@ const Sidebar = React.forwardRef<
     },
     ref
   ) => {
-    const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+    const sidebarContext = useSidebar()
+    
+    // Safety check to prevent useSidebar error
+    if (!sidebarContext) {
+      return (
+        <div
+          className={cn(
+            "flex h-full w-[--sidebar-width] flex-col bg-sidebar text-sidebar-foreground",
+            className
+          )}
+          ref={ref}
+          {...props}
+        >
+          {children}
+        </div>
+      )
+    }
+    
+    const { isMobile, state, openMobile, setOpenMobile } = sidebarContext
 
     if (collapsible === "none") {
       return (
@@ -242,7 +260,8 @@ const SidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
   React.ComponentProps<typeof Button>
 >(({ className, onClick, ...props }, ref) => {
-  const { toggleSidebar } = useSidebar()
+  const sidebarContext = useSidebar()
+  const { toggleSidebar } = sidebarContext || { toggleSidebar: () => {} }
 
   return (
     <Button
@@ -268,7 +287,8 @@ const SidebarRail = React.forwardRef<
   HTMLButtonElement,
   React.ComponentProps<"button">
 >(({ className, ...props }, ref) => {
-  const { toggleSidebar } = useSidebar()
+  const sidebarContext = useSidebar()
+  const { toggleSidebar } = sidebarContext || { toggleSidebar: () => {} }
 
   return (
     <button
@@ -533,7 +553,8 @@ const SidebarMenuButton = React.forwardRef<
     ref
   ) => {
     const Comp = asChild ? Slot : "button"
-    const { isMobile, state } = useSidebar()
+    const sidebarContext = useSidebar()
+    const { isMobile, state } = sidebarContext || { isMobile: false, state: "expanded" }
 
     const button = (
       <Comp
