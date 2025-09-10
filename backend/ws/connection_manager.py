@@ -168,7 +168,7 @@ class ConnectionManager:
         # Handle AGENT_CONNECTED messages directly (trigger automatic schema refresh)
         if message_type == "AGENT_CONNECTED":
             await self.handle_agent_connected(agent_id, message)
-            return
+            # Don't return here - continue to call registered handlers too
 
         # Check for response to a specific query
         if "query_id" in message:
@@ -268,6 +268,8 @@ class ConnectionManager:
                 
                 # Now handle the database save with retry logic and progressive timeouts
                 schema_data = response.get("schema")
+                logger.info(f"Schema data received from agent: {type(schema_data)} - {schema_data}")
+                
                 if schema_data:
                     logger.info(f"Schema discovered successfully, saving to database...")
                     
@@ -279,7 +281,7 @@ class ConnectionManager:
                     else:
                         logger.error(f"Failed to save schema for connection '{connection.name}' (agent: {agent_id}) after all retries")
                 else:
-                    logger.warning(f"No schema data received from agent '{agent_id}'")
+                    logger.warning(f"No schema data received from agent '{agent_id}' - response: {response}")
                     
             finally:
                 db.close()
@@ -373,10 +375,13 @@ class ConnectionManager:
             query_id: Unique identifier for the query
             data: Response data from the agent
         """
+        logger.info(f"Processing response for query '{query_id}': {data}")
         self.response_data[query_id] = data
         if query_id in self.response_events:
             self.response_events[query_id].set()
             logger.info(f"Response received for query '{query_id}': {data}")
+        else:
+            logger.warning(f"No event listener found for query '{query_id}' - response may be lost")
 
     async def wait_for_response(self, query_id: str, timeout: int = 30) -> Dict[str, Any]:
         """
@@ -395,7 +400,9 @@ class ConnectionManager:
         try:
             logger.info(f"Waiting for response for query '{query_id}' (timeout: {timeout}s)...")
             await asyncio.wait_for(event.wait(), timeout=timeout)
-            return self.response_data.pop(query_id, {"error": "No response data found"})
+            response_data = self.response_data.pop(query_id, {"error": "No response data found"})
+            logger.info(f"Response received for query '{query_id}': {response_data}")
+            return response_data
         except asyncio.TimeoutError:
             logger.warning(f"Timeout waiting for response to query '{query_id}'")
             return {"error": "Request timed out"}

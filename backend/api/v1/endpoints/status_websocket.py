@@ -73,7 +73,10 @@ async def send_all_agent_status(websocket: WebSocket):
 
 async def broadcast_agent_status_update(agent_id: str, agent_connected: bool):
     """Broadcast agent status update to all connected status WebSocket clients."""
+    logger.info(f"Broadcasting agent status update for {agent_id}: {agent_connected} to {len(status_connections)} clients")
+    
     if not status_connections:
+        logger.warning("No status WebSocket connections available for broadcasting")
         return
         
     message = {
@@ -88,6 +91,7 @@ async def broadcast_agent_status_update(agent_id: str, agent_connected: bool):
     for websocket in status_connections.copy():
         try:
             await websocket.send_text(message_text)
+            logger.debug(f"Sent status update to WebSocket client: {agent_id} -> {agent_connected}")
         except WebSocketDisconnect:
             disconnected_connections.add(websocket)
         except Exception as e:
@@ -98,7 +102,7 @@ async def broadcast_agent_status_update(agent_id: str, agent_connected: bool):
     for websocket in disconnected_connections:
         status_connections.discard(websocket)
     
-    logger.info(f"Broadcasted agent status update for {agent_id}: {agent_connected} to {len(status_connections)} clients")
+    logger.info(f"Successfully broadcasted agent status update for {agent_id}: {agent_connected} to {len(status_connections)} clients")
 
 # Register handlers with the connection manager
 def register_status_handlers():
@@ -106,15 +110,18 @@ def register_status_handlers():
     
     async def on_agent_connect(agent_id: str, message: Dict):
         """Handle agent connection."""
+        logger.info(f"Status handler: Agent {agent_id} connected - broadcasting status update")
         await broadcast_agent_status_update(agent_id, True)
     
     async def on_agent_disconnect(agent_id: str, message: Dict):
         """Handle agent disconnection."""
+        logger.info(f"Status handler: Agent {agent_id} disconnected - broadcasting status update")
         await broadcast_agent_status_update(agent_id, False)
     
     # Register the handlers
     manager.register_message_handler("AGENT_CONNECTED", on_agent_connect)
     manager.register_message_handler("AGENT_DISCONNECTED", on_agent_disconnect)
+    logger.info("Status handlers registered for AGENT_CONNECTED and AGENT_DISCONNECTED")
 
 # Initialize handlers when module is imported
 register_status_handlers()
