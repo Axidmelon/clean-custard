@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 
 class QueryRequest(BaseModel):
-    connection_id: uuid.UUID
+    connection_id: str
     question: str
 
 
@@ -46,7 +46,13 @@ async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(
     This endpoint orchestrates the entire "question-to-answer" flow.
     """
     # 1. Fetch the Connection and its Schema from our database
-    db_connection = db.query(Connection).filter(Connection.id == request.connection_id).first()
+    # Convert string connection_id to UUID for database query
+    try:
+        connection_uuid = uuid.UUID(request.connection_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+    
+    db_connection = db.query(Connection).filter(Connection.id == connection_uuid).first()
 
     if not db_connection:
         raise HTTPException(status_code=404, detail="Connection not found.")

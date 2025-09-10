@@ -23,7 +23,8 @@ load_dotenv()
 
 # Configuration from environment variables - no hardcoded defaults
 BACKEND_WS_URL = os.getenv("BACKEND_WEBSOCKET_URI")
-CONNECTION_ID = os.getenv("CONNECTION_ID")
+CONNECTION_ID = os.getenv("CONNECTION_ID")  # Database UUID for identification
+AGENT_ID = os.getenv("AGENT_ID")  # Agent ID for WebSocket routing
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "port": os.getenv("DB_PORT"),
@@ -36,6 +37,7 @@ DB_CONFIG = {
 required_vars = [
     "BACKEND_WEBSOCKET_URI",
     "CONNECTION_ID",
+    "AGENT_ID",
     "DB_HOST",
     "DB_PORT",
     "DB_NAME",
@@ -248,7 +250,8 @@ class CustardAgent:
     """
 
     def __init__(self):
-        self.connection_id = CONNECTION_ID
+        self.connection_id = CONNECTION_ID  # Database UUID for identification
+        self.agent_id = AGENT_ID  # Agent ID for WebSocket routing
         self.backend_url = BACKEND_WS_URL
         self.running = False
 
@@ -267,9 +270,11 @@ class CustardAgent:
             WebSocket connection or None if failed
         """
         try:
-            logger.info(f"Connecting to backend at: {self.backend_url}")
-            websocket = await websockets.connect(self.backend_url)
-            logger.info("✅ Successfully connected to Custard backend")
+            # Use agent_id for WebSocket URL routing
+            websocket_url = self.backend_url.replace("{agent_id}", self.agent_id)
+            logger.info(f"Connecting to backend at: {websocket_url}")
+            websocket = await websockets.connect(websocket_url)
+            logger.info(f"✅ Successfully connected to Custard backend as agent: {self.agent_id}")
             return websocket
         except Exception as e:
             logger.error(f"Failed to connect to backend: {e}")
@@ -313,7 +318,7 @@ class CustardAgent:
         Main agent loop that connects and listens for commands.
         """
         self.running = True
-        logger.info(f"Starting Custard Agent: {self.connection_id}")
+        logger.info(f"Starting Custard Agent: {self.agent_id} (Connection: {self.connection_id})")
 
         while self.running:
             websocket = await self.connect_to_backend()

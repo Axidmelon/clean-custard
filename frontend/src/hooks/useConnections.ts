@@ -1,5 +1,6 @@
 // Custom hooks for connection management using React Query
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 import { connectionService } from '@/services/connectionService';
 import { 
   Connection, 
@@ -7,7 +8,8 @@ import {
   CreateConnectionRequest 
 } from '@/types/api';
 import { APP_CONFIG } from '@/lib/constants';
-import { logError } from '@/lib/logger';
+import { logError, logDebug } from '@/lib/logger';
+import { useWebSocketStatus } from './useWebSocketStatus';
 
 // Query keys for React Query
 export const QUERY_KEYS = {
@@ -47,15 +49,55 @@ export function useConnection(connectionId: string) {
   });
 }
 
-// Hook to fetch connection status
+// Hook to fetch connection status with WebSocket real-time updates and polling fallback
 export function useConnectionStatus(connectionId: string) {
-  return useQuery({
+  const [useWebSocket, setUseWebSocket] = useState(true);
+  
+  // WebSocket status hook
+  const { agentConnected: wsAgentConnected, isWebSocketConnected, reconnect } = useWebSocketStatus(connectionId);
+  
+  // Polling fallback query
+  const pollingQuery = useQuery({
     queryKey: QUERY_KEYS.connectionStatus(connectionId),
     queryFn: () => connectionService.getConnectionStatus(connectionId),
-    enabled: !!connectionId,
-    staleTime: APP_CONFIG.CACHE_TIMES.CONNECTION_STATUS,
-    refetchInterval: APP_CONFIG.CACHE_TIMES.CONNECTION_STATUS,
+    enabled: !!connectionId && !useWebSocket,
+    staleTime: 2 * 60 * 1000, // 2 minutes when using polling
+    refetchInterval: 2 * 60 * 1000, // Poll every 2 minutes as fallback
   });
+
+  // Switch to polling if WebSocket fails
+  useEffect(() => {
+    if (!isWebSocketConnected && useWebSocket) {
+      logDebug('WebSocket disconnected, switching to polling fallback');
+      setUseWebSocket(false);
+    }
+  }, [isWebSocketConnected, useWebSocket]);
+
+  // Switch back to WebSocket if it reconnects
+  useEffect(() => {
+    if (isWebSocketConnected && !useWebSocket) {
+      logDebug('WebSocket reconnected, switching back to real-time updates');
+      setUseWebSocket(true);
+    }
+  }, [isWebSocketConnected, useWebSocket]);
+
+  // Determine the current status
+  const agentConnected = useWebSocket ? wsAgentConnected : pollingQuery.data?.agent_connected;
+  const isLoading = useWebSocket ? wsAgentConnected === null : pollingQuery.isLoading;
+  const error = useWebSocket ? null : pollingQuery.error;
+
+  return {
+    data: {
+      agent_connected: agentConnected,
+      status: agentConnected ? 'active' : 'disconnected',
+      connection_id: connectionId,
+    },
+    isLoading,
+    error,
+    isWebSocketConnected,
+    reconnect,
+    refetch: pollingQuery.refetch,
+  };
 }
 
 // Hook to create a new connection

@@ -1,4 +1,4 @@
-import { Database, Layers, GitBranch, CheckCircle, Snowflake, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { Database, Layers, GitBranch, CheckCircle, Snowflake, Loader2, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,9 +6,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CreateConnectionRequest, Connection as ApiConnection, Connection } from "@/types/api";
-import { useConnectionsWithDetails, useCreateConnection, useDeleteConnection, useRefreshConnections } from "@/hooks/useConnections";
+import { useConnectionsWithDetails, useCreateConnection, useDeleteConnection, useConnectionStatus } from "@/hooks/useConnections";
+import { useWebSocketConnectionStatus } from "@/hooks/useWebSocketStatus";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { APP_CONFIG } from "@/lib/constants";
 import { logApiResponse, logUserAction, logError, logDebug } from "@/lib/logger";
@@ -162,6 +163,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   const [connectionName, setConnectionName] = useState('');
   const [generatedApiKey, setGeneratedApiKey] = useState<string>('');
   const [generatedAgentId, setGeneratedAgentId] = useState<string>('');
+  const [generatedConnectionId, setGeneratedConnectionId] = useState<string>('');
   const [generatedWebsocketUrl, setGeneratedWebsocketUrl] = useState<string>('');
   
   const form = useForm<DatabaseCredentials>({
@@ -183,7 +185,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
       // Log the response for debugging
       logApiResponse('Create Connection', response);
       
-      // Store the generated API key and agent ID for Step 2
+      // Store the generated API key, agent ID, and connection ID for Step 2
       if (response.api_key) {
         setGeneratedApiKey(response.api_key);
         logDebug('Set generated API key:', response.api_key);
@@ -196,6 +198,13 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
         logDebug('Set generated agent ID:', response.agent_id);
       } else {
         logDebug('No agent ID in response');
+      }
+      
+      if (response.id) {
+        setGeneratedConnectionId(response.id);
+        logDebug('Set generated connection ID:', response.id);
+      } else {
+        logDebug('No connection ID in response');
       }
       
       if (response.websocket_url) {
@@ -293,19 +302,24 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   const handleCopyCommand = async () => {
     const apiKey = generatedApiKey || APP_CONFIG.DEFAULT_API_KEY_PLACEHOLDER;
     const agentId = generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    const connectionId = generatedConnectionId || 'YOUR_CONNECTION_UUID_HERE'; // Use the actual database UUID
     const websocketUrl = generatedWebsocketUrl || `${APP_CONFIG.DOCKER.BACKEND_URL}/api/v1/connections/ws/${agentId}`;
     
     // Log the values being used for debugging
     logDebug('Generated API key state:', generatedApiKey);
     logDebug('Generated agent ID state:', generatedAgentId);
+    logDebug('Generated connection ID state:', generatedConnectionId);
     logDebug('Generated WebSocket URL state:', generatedWebsocketUrl);
     logDebug('API key being used:', apiKey);
     logDebug('Agent ID being used:', agentId);
+    logDebug('Connection ID being used:', connectionId);
     logDebug('WebSocket URL being used:', websocketUrl);
     
     const command = `docker run -d \\
   --name custard-agent-${connectionName.toLowerCase().replace(/\s+/g, '-')} \\
-  -e CONNECTION_ID="${agentId}" \\
+  --network host \\
+  -e CONNECTION_ID="${connectionId}" \\
+  -e AGENT_ID="${agentId}" \\
   -e BACKEND_WEBSOCKET_URI="${websocketUrl}" \\
   -e DB_HOST="YOUR_${databaseTemplate.name.toUpperCase()}_HOST" \\
   -e DB_PORT="YOUR_DB_PORT" \\
@@ -520,7 +534,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
             <div>
               <h4 className="text-sm font-semibold text-gray-900">Generated Command</h4>
               <p className="text-xs text-gray-500 mt-1">
-                ⚠️ Complete setup requirements first
+                ⚠️ Replace placeholder values with your actual database credentials
               </p>
             </div>
             <div className="flex space-x-2">
@@ -556,7 +570,9 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
               <pre className="whitespace-pre-wrap text-xs leading-relaxed font-mono overflow-x-auto">
 {`docker run -d \\
   --name custard-agent-${connectionName.toLowerCase().replace(/\s+/g, '-')} \\
-  -e CONNECTION_ID="${generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`}" \\
+  --network host \\
+  -e CONNECTION_ID="${generatedConnectionId || 'YOUR_CONNECTION_UUID_HERE'}" \\
+  -e AGENT_ID="${generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`}" \\
   -e BACKEND_WEBSOCKET_URI="${generatedWebsocketUrl || `${APP_CONFIG.DOCKER.BACKEND_URL}/api/v1/connections/ws/${generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`}`}" \\
   -e DB_HOST="YOUR_${databaseTemplate.name.toUpperCase()}_HOST" \\
   -e DB_PORT="YOUR_DB_PORT" \\
@@ -669,6 +685,49 @@ function DatabaseCard({ databaseTemplate }: { databaseTemplate: DatabaseTemplate
   );
 }
 
+// WebSocket Status Indicator Component
+function WebSocketStatusIndicator() {
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
+  // Use the dedicated WebSocket connection status hook
+  const { isWebSocketConnected, reconnect } = useWebSocketConnectionStatus();
+
+  const handleReconnect = async () => {
+    setIsReconnecting(true);
+    try {
+      await reconnect();
+    } finally {
+      setIsReconnecting(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
+        <div className={`w-2 h-2 rounded-full ${isWebSocketConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span className="text-xs text-muted-foreground">
+          {isWebSocketConnected ? 'Real-time' : 'Polling'}
+        </span>
+      </div>
+      {!isWebSocketConnected && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleReconnect}
+          disabled={isReconnecting}
+          className="h-6 px-2 text-xs"
+        >
+          {isReconnecting ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            'Reconnect'
+          )}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // Simple Connection Card Component (shows name, db_type, status)
 function SimpleConnectionCard({ connection, onDelete }: { 
   connection: Connection; 
@@ -687,57 +746,55 @@ function SimpleConnectionCard({ connection, onDelete }: {
     });
   };
 
-  const getStatusInfo = (status: string) => {
-    const statusLower = status.toLowerCase();
-    
-    if (statusLower === 'connected' || statusLower === 'active') {
-      return {
-        badge: (
-          <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
-            <CheckCircle className="w-3 h-3 mr-1" />
-            Connected
-          </Badge>
-        ),
-        iconBg: 'bg-green-50 border-green-200',
-        iconColor: 'text-green-600'
-      };
-    } else if (statusLower === 'pending' || statusLower === 'created') {
-      return {
-        badge: (
-          <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">
-            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-            Pending
-          </Badge>
-        ),
-        iconBg: 'bg-yellow-50 border-yellow-200',
-        iconColor: 'text-yellow-600'
-      };
-    } else if (statusLower === 'disconnected' || statusLower === 'error') {
-      return {
-        badge: (
-          <Badge className="bg-red-100 text-red-700 hover:bg-red-100">
-            <AlertCircle className="w-3 h-3 mr-1" />
-            Disconnected
-          </Badge>
-        ),
-        iconBg: 'bg-red-50 border-red-200',
-        iconColor: 'text-red-600'
-      };
-    } else {
+  // Use real-time status check with WebSocket and polling fallback
+  const { 
+    data: statusData, 
+    isLoading: statusLoading, 
+    isWebSocketConnected, 
+    reconnect 
+  } = useConnectionStatus(connection.id);
+
+  const getStatusInfo = (isConnected: boolean | null | undefined, isLoading: boolean, wsConnected: boolean) => {
+    if (isLoading) {
       return {
         badge: (
           <Badge className="bg-gray-100 text-gray-700 hover:bg-gray-100">
-            {status}
+            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            Checking...
           </Badge>
         ),
         iconBg: 'bg-gray-50 border-gray-200',
         iconColor: 'text-gray-600'
       };
     }
+    
+    if (isConnected) {
+      return {
+        badge: (
+          <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
+            <CheckCircle className="w-3 h-3 mr-1" />
+            {wsConnected ? 'Connected' : 'Connected (Polling)'}
+          </Badge>
+        ),
+        iconBg: 'bg-green-50 border-green-200',
+        iconColor: 'text-green-600'
+      };
+    } else {
+      return {
+        badge: (
+          <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">
+            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            {wsConnected ? 'Pending' : 'Pending (Polling)'}
+          </Badge>
+        ),
+        iconBg: 'bg-yellow-50 border-yellow-200',
+        iconColor: 'text-yellow-600'
+      };
+    }
   };
 
   const IconComponent = getDbIcon(connection.db_type);
-  const statusInfo = getStatusInfo(connection.status);
+  const statusInfo = getStatusInfo(statusData?.agent_connected, statusLoading, isWebSocketConnected);
   
   return (
     <Card className="border-0 shadow-sm bg-white">
@@ -777,18 +834,11 @@ export default function Connections() {
   const { 
     data: connections, 
     isLoading: loadingConnections, 
-    error: connectionsError,
-    refetch: refetchConnections 
+    error: connectionsError
   } = useConnectionsWithDetails();
   
   const deleteConnectionMutation = useDeleteConnection();
 
-  // Handle new connection creation
-  const handleConnectionCreated = (newConnection: ApiConnection) => {
-    // The connection will automatically appear in the list due to React Query's cache invalidation
-    // in the useCreateConnection hook, but we can also trigger a refetch to ensure it's visible
-    refetchConnections();
-  };
 
   const handleDeleteConnection = async (connectionId: string) => {
     if (window.confirm('Are you sure you want to delete this connection?')) {
@@ -827,15 +877,9 @@ export default function Connections() {
               Manage your active database connections
             </p>
           </div>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => refetchConnections()}
-            disabled={loadingConnections}
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${loadingConnections ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <WebSocketStatusIndicator />
+          </div>
         </div>
         
         {loadingConnections ? (

@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from ws.connection_manager import manager  # Import our global manager
+from core.websocket_cors import validate_websocket_cors
 
 router = APIRouter()
 
@@ -18,6 +19,7 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
     - Agent connection establishment
     - Message routing and processing
     - Connection cleanup on disconnect
+    - CORS validation for both development and production environments
 
     Args:
         websocket: WebSocket connection object
@@ -26,6 +28,11 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"WebSocket connection attempt from agent: {agent_id}")
+
+    # Validate CORS using centralized validator
+    # Note: Agents might not send origin header, which is allowed
+    if not await validate_websocket_cors(websocket, f"agent-websocket-{agent_id}"):
+        return
 
     try:
         # Accept the connection

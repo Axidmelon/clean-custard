@@ -54,6 +54,9 @@ class ConnectionManager:
             "message_count": 0,
         }
         logger.info(f"Agent '{agent_id}' connected. Total agents: {len(self.active_connections)}")
+        
+        # Emit agent connected event
+        await self.handle_message(agent_id, {"type": "AGENT_CONNECTED"})
 
     def disconnect(self, agent_id: str) -> None:
         """
@@ -68,6 +71,10 @@ class ConnectionManager:
             logger.info(
                 f"Agent '{agent_id}' disconnected. Total agents: {len(self.active_connections)}"
             )
+            
+            # Emit agent disconnected event
+            import asyncio
+            asyncio.create_task(self.handle_message(agent_id, {"type": "AGENT_DISCONNECTED"}))
 
     async def send_json_to_agent(self, message: Dict[str, Any], agent_id: str) -> bool:
         """
@@ -152,6 +159,16 @@ class ConnectionManager:
         message_type = message.get("type")
         logger.debug(f"Handling message from '{agent_id}': {message_type}")
 
+        # Handle PING messages directly (common agent health check)
+        if message_type == "PING":
+            await self.handle_ping(agent_id, message)
+            return
+
+        # Handle AGENT_CONNECTED messages directly (trigger automatic schema refresh)
+        if message_type == "AGENT_CONNECTED":
+            await self.handle_agent_connected(agent_id, message)
+            return
+
         # Check for response to a specific query
         if "query_id" in message:
             self.handle_response(message["query_id"], message)
@@ -164,6 +181,104 @@ class ConnectionManager:
                 logger.error(f"Error in message handler for '{message_type}': {e}")
         else:
             logger.debug(f"No handler registered for message type: {message_type}")
+
+    async def handle_ping(self, agent_id: str, message: Dict[str, Any]) -> None:
+        """
+        Handle a PING message from an agent by responding with PONG.
+
+        Args:
+            agent_id: ID of the agent that sent the ping
+            message: The PING message data
+        """
+        logger.debug(f"Received PING from agent '{agent_id}'")
+        
+        # Create PONG response
+        pong_response = {
+            "type": "PONG",
+            "payload": {
+                "status": "healthy",
+                "timestamp": time.time(),
+                "agent_id": agent_id
+            }
+        }
+        
+        # Send PONG response back to agent
+        success = await self.send_json_to_agent(pong_response, agent_id)
+        if success:
+            logger.debug(f"Sent PONG response to agent '{agent_id}'")
+        else:
+            logger.warning(f"Failed to send PONG response to agent '{agent_id}'")
+
+    async def handle_agent_connected(self, agent_id: str, message: Dict[str, Any]) -> None:
+        """
+        Handle an AGENT_CONNECTED message by triggering automatic schema refresh.
+
+        Args:
+            agent_id: ID of the agent that connected
+            message: The AGENT_CONNECTED message data
+        """
+        logger.info(f"Agent '{agent_id}' connected - triggering automatic schema refresh")
+        
+        # Add a small delay to ensure the WebSocket connection is fully established
+        import asyncio
+        await asyncio.sleep(1)
+        
+        try:
+            # Import here to avoid circular imports
+            from db.dependencies import get_db
+            from db.models import Connection
+            from sqlalchemy.orm import Session
+            import uuid
+            
+            # Check if agent is still connected after the delay
+            if not self.is_agent_connected(agent_id):
+                logger.warning(f"Agent '{agent_id}' disconnected before schema refresh could start")
+                return
+            
+            # Get database session
+            db_gen = get_db()
+            db: Session = next(db_gen)
+            
+            try:
+                # Find the connection by agent_id
+                connection = db.query(Connection).filter(Connection.agent_id == agent_id).first()
+                
+                if not connection:
+                    logger.warning(f"No connection found for agent '{agent_id}' - skipping schema refresh")
+                    return
+                
+                logger.info(f"Found connection '{connection.name}' for agent '{agent_id}' - starting schema refresh")
+                
+                # Create the schema discovery command
+                command = {
+                    "type": "SCHEMA_DISCOVERY_REQUEST",
+                    "query_id": str(uuid.uuid4()),
+                    "payload": {"connection_id": str(connection.id)},
+                }
+                
+                # Send command to the agent and wait for a response
+                response = await self.send_query_to_agent(command, agent_id, timeout=30)
+                
+                if not response or response.get("status") != "success":
+                    error_detail = response.get("error", "Agent did not return a valid schema.")
+                    logger.error(f"Schema refresh failed for agent '{agent_id}': {error_detail}")
+                    return
+                
+                # Save the schema to the database
+                schema_data = response.get("schema")
+                if schema_data:
+                    connection.db_schema_cache = schema_data
+                    db.commit()
+                    db.refresh(connection)
+                    logger.info(f"Successfully cached schema for connection '{connection.name}' (agent: {agent_id})")
+                else:
+                    logger.warning(f"No schema data received from agent '{agent_id}'")
+                    
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"Error during automatic schema refresh for agent '{agent_id}': {e}")
 
     def handle_response(self, query_id: str, data: Any) -> None:
         """
@@ -291,16 +406,17 @@ class ConnectionManager:
         Send a query to an agent and wait for the response.
 
         Args:
-            query: Query data to send
+            query: Query data to send (should already contain query_id)
             agent_id: Target agent identifier
             timeout: Maximum time to wait for response
 
         Returns:
             Response from the agent or error message
         """
-        # Generate unique query ID
-        query_id = f"query_{time.time()}_{agent_id}"
-        query["query_id"] = query_id
+        # Extract query_id from the query (should already be set by caller)
+        query_id = query.get("query_id")
+        if not query_id:
+            return {"error": "Query must contain a query_id"}
 
         # Send the query
         success = await self.send_json_to_agent(query, agent_id)

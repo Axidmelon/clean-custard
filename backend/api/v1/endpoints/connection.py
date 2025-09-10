@@ -117,6 +117,8 @@ def list_connections(db: Session = Depends(get_db)):
                     "name": conn.name,
                     "db_type": conn.db_type,
                     "status": conn.status or "PENDING",  # Default to PENDING if NULL
+                    "agent_id": conn.agent_id,  # Include agent_id for query functionality
+                    "db_schema_cache": conn.db_schema_cache is not None,  # Boolean indicating if schema is cached
                     "created_at": conn.created_at.isoformat() if conn.created_at else None,
                 }
             )
@@ -194,8 +196,10 @@ async def refresh_schema(
             )
 
         # Create the schema discovery command
+        import uuid
         command = {
             "type": "SCHEMA_DISCOVERY_REQUEST",
+            "query_id": str(uuid.uuid4()),  # Add query_id for agent compatibility
             "payload": {"connection_id": str(connection_id)},
         }
 
