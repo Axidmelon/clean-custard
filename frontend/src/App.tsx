@@ -17,8 +17,22 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import EmailVerification from "./pages/EmailVerification";
 import ResetPassword from "./pages/ResetPassword";
+import { useEffect } from "react";
+import { logDebug } from "./lib/logger";
 
 const queryClient = new QueryClient();
+
+// Component to initialize status WebSocket connection
+const StatusWebSocketInitializer = () => {
+  useEffect(() => {
+    // Import the status manager to ensure it's initialized
+    import('./hooks/useWebSocketStatus').then(({ statusManager }) => {
+      logDebug('Status WebSocket manager initialized');
+    });
+  }, []);
+  
+  return null;
+};
 
 const App = () => {
   return (
@@ -33,6 +47,7 @@ const App = () => {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthProvider>
+            <StatusWebSocketInitializer />
             <Toaster />
             <Sonner />
             <BrowserRouter>

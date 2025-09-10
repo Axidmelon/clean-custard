@@ -98,7 +98,7 @@ class WebSocketStatusManagerImpl implements WebSocketStatusManager {
 
   private scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logError('Max WebSocket reconnection attempts reached');
+      logError('WebSocket reconnection', new Error('Max WebSocket reconnection attempts reached'));
       return;
     }
 
@@ -165,6 +165,9 @@ class WebSocketStatusManagerImpl implements WebSocketStatusManager {
 
 // Singleton instance
 const statusManager = new WebSocketStatusManagerImpl();
+
+// Export the status manager for app-level initialization
+export { statusManager };
 
 // Cleanup on page unload
 if (typeof window !== 'undefined') {
