@@ -2,6 +2,7 @@
 
 import os
 import asyncio
+import time
 import websockets
 import json
 import psycopg2
@@ -127,18 +128,49 @@ def discover_database_schema() -> str:
         String representation of the database schema
     """
     try:
+        logger.info("Starting database schema discovery...")
+        
+        # Validate database configuration first
+        missing_config = [key for key, value in DB_CONFIG.items() if not value]
+        if missing_config:
+            error_msg = f"Missing database configuration: {missing_config}"
+            logger.error(error_msg)
+            return f"Schema discovery failed: {error_msg}"
+        
+        # Test database connection before schema discovery
+        logger.info("Testing database connection...")
+        try:
+            with psycopg2.connect(**DB_CONFIG) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    logger.info("✓ Database connection successful")
+        except psycopg2.Error as e:
+            error_msg = f"Database connection failed: {e}"
+            logger.error(error_msg)
+            return f"Schema discovery failed: {error_msg}"
+        
         # Get schema configuration from environment variables
         schema_name = os.getenv("SCHEMA_NAME", "public")
         table_filter = os.getenv("TABLE_FILTER")
         if table_filter:
             table_filter = [table.strip() for table in table_filter.split(",")]
+            logger.info(f"Using table filter: {table_filter}")
 
+        logger.info(f"Discovering schema for database: {DB_CONFIG['dbname']}, schema: {schema_name}")
+        
         discoverer = SchemaDiscoverer(
             **DB_CONFIG, schema_name=schema_name, table_filter=table_filter
         )
+        
+        # No timeout - let schema discovery take as long as needed
+        # The backend will handle timeouts for the save operation
+        start_time = time.time()
         schema = discoverer.discover_schema()
-        logger.info("Database schema discovery completed")
+        discovery_time = time.time() - start_time
+        
+        logger.info(f"✓ Database schema discovery completed successfully in {discovery_time:.2f} seconds")
         return schema
+            
     except Exception as e:
         logger.error(f"Schema discovery failed: {e}")
         return f"Schema discovery failed: {e}"
@@ -193,27 +225,47 @@ async def handle_schema_discovery(
     """
     logger.info("Handling schema discovery request")
     query_id = command.get("query_id")
+    connection_id = command.get("payload", {}).get("connection_id")
 
     try:
+        logger.info(f"Starting schema discovery for connection: {connection_id}")
+        
         # Discover the schema using our updated discoverer
         schema_data = discover_database_schema()
 
-        # Build the successful response, including the query_id
-        response = {
-            "query_id": query_id,
-            "status": "success",
-            "schema": schema_data,  # This will be the dictionary
-        }
-        logger.info("Schema discovery successful, sending response.")
+        # Check if schema discovery was successful
+        if isinstance(schema_data, str) and schema_data.startswith("Schema discovery failed"):
+            # Schema discovery failed, return error
+            logger.error(f"Schema discovery failed: {schema_data}")
+            response = {
+                "query_id": query_id,
+                "status": "error",
+                "error": schema_data
+            }
+        else:
+            # Schema discovery successful
+            logger.info("Schema discovery successful, sending response.")
+            response = {
+                "query_id": query_id,
+                "status": "success",
+                "schema": schema_data,  # This will be the dictionary
+            }
 
     except Exception as e:
         # If anything goes wrong, build an error response
         logger.error(f"Schema discovery failed during handling: {e}")
-        response = {"query_id": query_id, "status": "error", "error": str(e)}
+        response = {
+            "query_id": query_id,
+            "status": "error",
+            "error": f"Schema discovery failed: {str(e)}"
+        }
 
     # Send the response back to the backend
-    await websocket.send(json.dumps(response))
-    logger.info("Schema discovery response sent")
+    try:
+        await websocket.send(json.dumps(response, default=str))
+        logger.info(f"Schema discovery response sent for query_id: {query_id}")
+    except Exception as e:
+        logger.error(f"Failed to send schema discovery response: {e}")
 
 
 async def handle_ping(

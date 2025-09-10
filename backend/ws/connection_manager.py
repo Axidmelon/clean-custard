@@ -258,20 +258,26 @@ class ConnectionManager:
                 }
                 
                 # Send command to the agent and wait for a response
-                response = await self.send_query_to_agent(command, agent_id, timeout=30)
+                # Use a generous timeout for schema discovery (no timeout on agent side)
+                response = await self.send_query_to_agent(command, agent_id, timeout=120)
                 
                 if not response or response.get("status") != "success":
                     error_detail = response.get("error", "Agent did not return a valid schema.")
-                    logger.error(f"Schema refresh failed for agent '{agent_id}': {error_detail}")
+                    logger.error(f"Schema discovery failed for agent '{agent_id}': {error_detail}")
                     return
                 
-                # Save the schema to the database
+                # Now handle the database save with retry logic and progressive timeouts
                 schema_data = response.get("schema")
                 if schema_data:
-                    connection.db_schema_cache = schema_data
-                    db.commit()
-                    db.refresh(connection)
-                    logger.info(f"Successfully cached schema for connection '{connection.name}' (agent: {agent_id})")
+                    logger.info(f"Schema discovered successfully, saving to database...")
+                    
+                    # Try to save with progressive timeouts and retries
+                    success = await self._save_schema_with_retry(db, connection, schema_data, agent_id)
+                    
+                    if success:
+                        logger.info(f"Successfully cached schema for connection '{connection.name}' (agent: {agent_id})")
+                    else:
+                        logger.error(f"Failed to save schema for connection '{connection.name}' (agent: {agent_id}) after all retries")
                 else:
                     logger.warning(f"No schema data received from agent '{agent_id}'")
                     
@@ -280,6 +286,84 @@ class ConnectionManager:
                 
         except Exception as e:
             logger.error(f"Error during automatic schema refresh for agent '{agent_id}': {e}")
+
+    async def _save_schema_with_retry(self, db, connection, schema_data, agent_id):
+        """
+        Save schema data to the database with retry logic and progressive timeouts.
+        
+        Args:
+            db: Database session
+            connection: Connection object to update
+            schema_data: Schema data to save
+            agent_id: Agent identifier for logging
+            
+        Returns:
+            bool: True if successful, False if all retries failed
+        """
+        # Progressive timeouts: 5s, 15s, 30s
+        timeouts = [5.0, 15.0, 30.0]
+        max_retries = len(timeouts)
+        
+        for attempt in range(max_retries):
+            timeout = timeouts[attempt]
+            logger.info(f"Attempt {attempt + 1}/{max_retries} to save schema (timeout: {timeout}s)")
+            
+            try:
+                # Use asyncio.wait_for to timeout the database save operation
+                await asyncio.wait_for(
+                    self._save_schema_to_database(db, connection, schema_data, agent_id),
+                    timeout=timeout
+                )
+                logger.info(f"Schema saved successfully on attempt {attempt + 1}")
+                return True
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"Database save timed out on attempt {attempt + 1} (timeout: {timeout}s)")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in 2 seconds...")
+                    await asyncio.sleep(2)
+                else:
+                    logger.error(f"All {max_retries} attempts timed out")
+                    
+            except Exception as e:
+                logger.error(f"Database save failed on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in 2 seconds...")
+                    await asyncio.sleep(2)
+                else:
+                    logger.error(f"All {max_retries} attempts failed")
+        
+        return False
+
+    async def _save_schema_to_database(self, db, connection, schema_data, agent_id):
+        """
+        Save schema data to the database with proper error handling.
+        
+        Args:
+            db: Database session
+            connection: Connection object to update
+            schema_data: Schema data to save
+            agent_id: Agent identifier for logging
+        """
+        try:
+            # Convert schema data to JSON string if it's a dict
+            if isinstance(schema_data, dict):
+                import json
+                schema_json = json.dumps(schema_data)
+            else:
+                schema_json = schema_data
+                
+            # Update the connection with the schema data
+            connection.db_schema_cache = schema_json
+            db.commit()
+            db.refresh(connection)
+            
+            logger.info(f"Schema saved to database for connection '{connection.name}' (agent: {agent_id})")
+            
+        except Exception as e:
+            logger.error(f"Failed to save schema to database: {e}")
+            db.rollback()
+            raise
 
     def handle_response(self, query_id: str, data: Any) -> None:
         """
