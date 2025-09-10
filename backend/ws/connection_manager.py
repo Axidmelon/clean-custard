@@ -164,7 +164,8 @@ class ConnectionManager:
             self.connection_metadata[agent_id]["message_count"] += 1
 
         message_type = message.get("type")
-        logger.debug(f"Handling message from '{agent_id}': {message_type}")
+        logger.info(f"Handling message from '{agent_id}': {message_type}")
+        logger.info(f"Message content: {message}")
 
         # Handle PING messages directly (common agent health check)
         if message_type == "PING":
@@ -176,9 +177,13 @@ class ConnectionManager:
             await self.handle_agent_connected(agent_id, message)
             # Don't return here - continue to call registered handlers too
 
-        # Check for response to a specific query
+        # Check for response to a specific query - THIS IS CRITICAL FOR SCHEMA DISCOVERY
         if "query_id" in message:
-            self.handle_response(message["query_id"], message)
+            query_id = message["query_id"]
+            logger.info(f"Processing response for query_id '{query_id}' from agent '{agent_id}'")
+            self.handle_response(query_id, message)
+        else:
+            logger.debug(f"No query_id in message from agent '{agent_id}': {message}")
 
         # Route to specific handler if registered
         if message_type in self.message_handlers:
@@ -230,70 +235,99 @@ class ConnectionManager:
         import asyncio
         await asyncio.sleep(1)
         
+        # Check if agent is still connected after the delay
+        if not self.is_agent_connected(agent_id):
+            logger.warning(f"Agent '{agent_id}' disconnected before schema refresh could start")
+            return
+        
+        # Import here to avoid circular imports
+        from db.dependencies import get_db
+        from db.models import Connection
+        from sqlalchemy.orm import Session
+        import uuid
+        
+        # Get database session with proper error handling
+        db_gen = None
+        db: Session = None
+        
         try:
-            # Import here to avoid circular imports
-            from db.dependencies import get_db
-            from db.models import Connection
-            from sqlalchemy.orm import Session
-            import uuid
+            db_gen = get_db()
+            db = next(db_gen)
+            logger.info(f"Database session created for agent '{agent_id}'")
             
-            # Check if agent is still connected after the delay
-            if not self.is_agent_connected(agent_id):
-                logger.warning(f"Agent '{agent_id}' disconnected before schema refresh could start")
+            # Find the connection by agent_id
+            connection = db.query(Connection).filter(Connection.agent_id == agent_id).first()
+            
+            if not connection:
+                logger.warning(f"No connection found for agent '{agent_id}' - skipping schema refresh")
                 return
             
-            # Get database session
-            db_gen = get_db()
-            db: Session = next(db_gen)
+            logger.info(f"Found connection '{connection.name}' for agent '{agent_id}' - starting schema refresh")
             
-            try:
-                # Find the connection by agent_id
-                connection = db.query(Connection).filter(Connection.agent_id == agent_id).first()
+            # Create the schema discovery command
+            command = {
+                "type": "SCHEMA_DISCOVERY_REQUEST",
+                "query_id": str(uuid.uuid4()),
+                "payload": {"connection_id": str(connection.id)},
+            }
+            
+            logger.info(f"Sending schema discovery command: {command}")
+            
+            # Send command to the agent and wait for a response
+            # Use a reasonable timeout for schema discovery (agent responds in ~3 seconds)
+            response = await self.send_query_to_agent(command, agent_id, timeout=10)
+            
+            logger.info(f"Schema discovery response received: {response}")
+            
+            if not response or response.get("status") != "success":
+                error_detail = response.get("error", "Agent did not return a valid schema.")
+                logger.error(f"Schema discovery failed for agent '{agent_id}': {error_detail}")
+                return
+            
+            # Now handle the database save with retry logic and progressive timeouts
+            schema_data = response.get("schema")
+            logger.info(f"Schema data received from agent: type={type(schema_data)}")
+            
+            if schema_data:
+                logger.info(f"Schema discovered successfully, saving to database...")
                 
-                if not connection:
-                    logger.warning(f"No connection found for agent '{agent_id}' - skipping schema refresh")
-                    return
+                # Try to save with progressive timeouts and retries
+                success = await self._save_schema_with_retry(db, connection, schema_data, agent_id)
                 
-                logger.info(f"Found connection '{connection.name}' for agent '{agent_id}' - starting schema refresh")
-                
-                # Create the schema discovery command
-                command = {
-                    "type": "SCHEMA_DISCOVERY_REQUEST",
-                    "query_id": str(uuid.uuid4()),
-                    "payload": {"connection_id": str(connection.id)},
-                }
-                
-                # Send command to the agent and wait for a response
-                # Use a generous timeout for schema discovery (no timeout on agent side)
-                response = await self.send_query_to_agent(command, agent_id, timeout=120)
-                
-                if not response or response.get("status") != "success":
-                    error_detail = response.get("error", "Agent did not return a valid schema.")
-                    logger.error(f"Schema discovery failed for agent '{agent_id}': {error_detail}")
-                    return
-                
-                # Now handle the database save with retry logic and progressive timeouts
-                schema_data = response.get("schema")
-                logger.info(f"Schema data received from agent: {type(schema_data)} - {schema_data}")
-                
-                if schema_data:
-                    logger.info(f"Schema discovered successfully, saving to database...")
-                    
-                    # Try to save with progressive timeouts and retries
-                    success = await self._save_schema_with_retry(db, connection, schema_data, agent_id)
-                    
-                    if success:
-                        logger.info(f"Successfully cached schema for connection '{connection.name}' (agent: {agent_id})")
-                    else:
-                        logger.error(f"Failed to save schema for connection '{connection.name}' (agent: {agent_id}) after all retries")
+                if success:
+                    logger.info(f"Successfully cached schema for connection '{connection.name}' (agent: {agent_id})")
                 else:
-                    logger.warning(f"No schema data received from agent '{agent_id}' - response: {response}")
+                    logger.error(f"Failed to save schema for connection '{connection.name}' (agent: {agent_id}) after all retries")
                     
-            finally:
-                db.close()
+                    # Try fallback save mechanism
+                    logger.info(f"Attempting fallback schema save for agent '{agent_id}'")
+                    fallback_success = await self.save_schema_fallback(agent_id, schema_data)
+                    
+                    if fallback_success:
+                        logger.info(f"Fallback schema save successful for agent '{agent_id}'")
+                    else:
+                        logger.error(f"Both main and fallback schema save failed for agent '{agent_id}'")
+            else:
+                logger.warning(f"No schema data received from agent '{agent_id}' - response: {response}")
                 
         except Exception as e:
             logger.error(f"Error during automatic schema refresh for agent '{agent_id}': {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+        finally:
+            # Ensure database session is properly closed
+            if db:
+                try:
+                    db.close()
+                    logger.info(f"Database session closed for agent '{agent_id}'")
+                except Exception as e:
+                    logger.error(f"Error closing database session for agent '{agent_id}': {e}")
+            elif db_gen:
+                try:
+                    db_gen.close()
+                    logger.info(f"Database generator closed for agent '{agent_id}'")
+                except Exception as e:
+                    logger.error(f"Error closing database generator for agent '{agent_id}': {e}")
 
     async def _save_schema_with_retry(self, db, connection, schema_data, agent_id):
         """
@@ -311,6 +345,9 @@ class ConnectionManager:
         # Progressive timeouts: 5s, 15s, 30s
         timeouts = [5.0, 15.0, 30.0]
         max_retries = len(timeouts)
+        
+        logger.info(f"Starting schema save with retry logic for connection '{connection.name}' (agent: {agent_id})")
+        logger.info(f"Schema data type: {type(schema_data)}, size: {len(str(schema_data)) if schema_data else 0}")
         
         for attempt in range(max_retries):
             timeout = timeouts[attempt]
@@ -335,12 +372,15 @@ class ConnectionManager:
                     
             except Exception as e:
                 logger.error(f"Database save failed on attempt {attempt + 1}: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 if attempt < max_retries - 1:
                     logger.info(f"Retrying in 2 seconds...")
                     await asyncio.sleep(2)
                 else:
                     logger.error(f"All {max_retries} attempts failed")
         
+        logger.error(f"Schema save failed after all {max_retries} attempts for connection '{connection.name}' (agent: {agent_id})")
         return False
 
     async def _save_schema_to_database(self, db, connection, schema_data, agent_id):
@@ -354,24 +394,70 @@ class ConnectionManager:
             agent_id: Agent identifier for logging
         """
         try:
-            # The db_schema_cache column is JSON type, so we should store the dict directly
-            # SQLAlchemy will handle the JSON serialization automatically
+            logger.info(f"Starting database save for connection '{connection.name}' (agent: {agent_id})")
+            logger.info(f"Connection ID: {connection.id}, Current schema cache: {connection.db_schema_cache}")
+            
+            # The db_schema_cache column is JSON type, so we need to ensure proper JSON format
+            # Convert to JSON string if it's a dict, or validate if it's already a string
             if isinstance(schema_data, str):
                 import json
-                schema_dict = json.loads(schema_data)
+                try:
+                    # Validate that it's proper JSON by parsing it
+                    schema_dict = json.loads(schema_data)
+                    logger.info(f"Validated schema JSON string: type={type(schema_dict)}")
+                    # Store as the original JSON string since database expects JSON format
+                    schema_to_store = schema_data
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse schema JSON string: {e}")
+                    raise
+            elif isinstance(schema_data, dict):
+                import json
+                # Convert dict to JSON string for database storage
+                schema_to_store = json.dumps(schema_data)
+                logger.info(f"Converted schema dict to JSON string: length={len(schema_to_store)}")
             else:
-                schema_dict = schema_data
-                
-            # Update the connection with the schema data (store as dict, not string)
-            connection.db_schema_cache = schema_dict
+                logger.error(f"Invalid schema data type: {type(schema_data)}")
+                raise ValueError(f"Invalid schema data type: {type(schema_data)}")
+            
+            # Validate schema data before saving
+            if not schema_to_store:
+                logger.error("Schema data is empty or None")
+                raise ValueError("Schema data is empty or None")
+            
+            # Update the connection with the schema data (store as JSON string)
+            logger.info(f"Updating connection '{connection.name}' with schema data...")
+            connection.db_schema_cache = schema_to_store
+            
+            # Commit the changes
+            logger.info(f"Committing schema changes to database...")
             db.commit()
+            
+            # Refresh the connection object to get updated data
+            logger.info(f"Refreshing connection object...")
             db.refresh(connection)
             
-            logger.info(f"Schema saved to database for connection '{connection.name}' (agent: {agent_id})")
+            # Verify the save was successful
+            if connection.db_schema_cache:
+                logger.info(f"Schema successfully saved to database for connection '{connection.name}' (agent: {agent_id})")
+                logger.info(f"Schema cache now contains: {type(connection.db_schema_cache)} with length {len(connection.db_schema_cache) if isinstance(connection.db_schema_cache, str) else 'unknown'}")
+                # Log a preview of the stored JSON
+                if isinstance(connection.db_schema_cache, str) and len(connection.db_schema_cache) > 100:
+                    logger.info(f"Schema JSON preview: {connection.db_schema_cache[:100]}...")
+                else:
+                    logger.info(f"Schema JSON content: {connection.db_schema_cache}")
+            else:
+                logger.error(f"Schema save verification failed - db_schema_cache is still None")
+                raise ValueError("Schema save verification failed")
             
         except Exception as e:
             logger.error(f"Failed to save schema to database: {e}")
-            db.rollback()
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            try:
+                db.rollback()
+                logger.info("Database transaction rolled back")
+            except Exception as rollback_error:
+                logger.error(f"Failed to rollback database transaction: {rollback_error}")
             raise
 
     def handle_response(self, query_id: str, data: Any) -> None:
@@ -383,12 +469,41 @@ class ConnectionManager:
             data: Response data from the agent
         """
         logger.info(f"Processing response for query '{query_id}': {data}")
+        
+        # Validate response data structure
+        if not isinstance(data, dict):
+            logger.error(f"Invalid response data type for query '{query_id}': {type(data)}")
+            return
+            
+        # Check for required fields in response
+        if "status" not in data:
+            logger.warning(f"Response missing 'status' field for query '{query_id}': {data}")
+        
+        # Log response details for debugging
+        response_status = data.get("status", "unknown")
+        logger.info(f"Response status for query '{query_id}': {response_status}")
+        
+        if response_status == "success":
+            schema_data = data.get("schema")
+            if schema_data:
+                logger.info(f"Schema data received for query '{query_id}': type={type(schema_data)}, size={len(str(schema_data)) if schema_data else 0}")
+            else:
+                logger.warning(f"No schema data in successful response for query '{query_id}'")
+        elif response_status == "error":
+            error_msg = data.get("error", "Unknown error")
+            logger.error(f"Error response for query '{query_id}': {error_msg}")
+        
+        # Store response data
         self.response_data[query_id] = data
+        
+        # Notify waiting coroutines
         if query_id in self.response_events:
             self.response_events[query_id].set()
-            logger.info(f"Response received for query '{query_id}': {data}")
+            logger.info(f"Response event set for query '{query_id}' - waiting coroutines will be notified")
         else:
             logger.warning(f"No event listener found for query '{query_id}' - response may be lost")
+            logger.info(f"Currently tracked queries: {list(self.response_events.keys())}")
+            logger.info(f"Currently stored responses: {list(self.response_data.keys())}")
 
     async def wait_for_response(self, query_id: str, timeout: int = 30) -> Dict[str, Any]:
         """
@@ -403,20 +518,42 @@ class ConnectionManager:
         """
         event = asyncio.Event()
         self.response_events[query_id] = event
+        
+        logger.info(f"Setting up response tracking for query '{query_id}' (timeout: {timeout}s)")
+        logger.info(f"Current tracked queries before wait: {list(self.response_events.keys())}")
 
         try:
             logger.info(f"Waiting for response for query '{query_id}' (timeout: {timeout}s)...")
             await asyncio.wait_for(event.wait(), timeout=timeout)
+            
+            # Get response data
             response_data = self.response_data.pop(query_id, {"error": "No response data found"})
-            logger.info(f"Response received for query '{query_id}': {response_data}")
+            
+            # Validate response
+            if "error" in response_data and response_data["error"] == "No response data found":
+                logger.error(f"Response data not found for query '{query_id}' despite event being set")
+                logger.info(f"Available response data keys: {list(self.response_data.keys())}")
+                return response_data
+            
+            logger.info(f"Response received for query '{query_id}': status={response_data.get('status', 'unknown')}")
+            
+            # Log schema data details if present
+            if response_data.get("status") == "success" and "schema" in response_data:
+                schema = response_data["schema"]
+                logger.info(f"Schema data in response: type={type(schema)}, keys={list(schema.keys()) if isinstance(schema, dict) else 'N/A'}")
+            
             return response_data
+            
         except asyncio.TimeoutError:
-            logger.warning(f"Timeout waiting for response to query '{query_id}'")
+            logger.warning(f"Timeout waiting for response to query '{query_id}' after {timeout}s")
+            logger.info(f"Response events still active: {list(self.response_events.keys())}")
+            logger.info(f"Response data still available: {list(self.response_data.keys())}")
             return {"error": "Request timed out"}
         finally:
             # Clean up tracking data
             self.response_events.pop(query_id, None)
             self.response_data.pop(query_id, None)
+            logger.info(f"Cleaned up tracking data for query '{query_id}'")
 
     async def listen_for_messages(self, agent_id: str) -> None:
         """
@@ -515,15 +652,25 @@ class ConnectionManager:
         # Extract query_id from the query (should already be set by caller)
         query_id = query.get("query_id")
         if not query_id:
+            logger.error("Query must contain a query_id")
             return {"error": "Query must contain a query_id"}
+
+        logger.info(f"Sending query to agent '{agent_id}': query_id={query_id}, type={query.get('type')}")
+        logger.info(f"Query payload: {query}")
 
         # Send the query
         success = await self.send_json_to_agent(query, agent_id)
         if not success:
+            logger.error(f"Failed to send query to agent '{agent_id}'")
             return {"error": "Failed to send query to agent"}
 
+        logger.info(f"Query sent successfully to agent '{agent_id}', waiting for response...")
+
         # Wait for response
-        return await self.wait_for_response(query_id, timeout)
+        response = await self.wait_for_response(query_id, timeout)
+        
+        logger.info(f"Query '{query_id}' completed with status: {response.get('status', 'unknown')}")
+        return response
 
     def get_connection_stats(self) -> Dict[str, Any]:
         """
@@ -564,6 +711,80 @@ class ConnectionManager:
             await broadcast_agent_status_update(agent_id, agent_connected)
         except Exception as e:
             logger.error(f"Failed to broadcast agent status update for {agent_id}: {e}")
+
+    async def save_schema_fallback(self, agent_id: str, schema_data: Dict[str, Any]) -> bool:
+        """
+        Fallback method to save schema data directly to the database.
+        This can be called when the automatic schema refresh fails.
+        
+        Args:
+            agent_id: Agent identifier
+            schema_data: Schema data to save
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        logger.info(f"Using fallback schema save for agent '{agent_id}'")
+        
+        try:
+            # Import here to avoid circular imports
+            from db.dependencies import get_db
+            from db.models import Connection
+            
+            # Get database session
+            db_gen = get_db()
+            db = next(db_gen)
+            
+            try:
+                # Find the connection by agent_id
+                connection = db.query(Connection).filter(Connection.agent_id == agent_id).first()
+                
+                if not connection:
+                    logger.error(f"No connection found for agent '{agent_id}' in fallback save")
+                    return False
+                
+                logger.info(f"Found connection '{connection.name}' for fallback schema save")
+                
+                # Ensure schema data is in proper JSON format for database storage
+                if isinstance(schema_data, dict):
+                    import json
+                    schema_to_store = json.dumps(schema_data)
+                    logger.info(f"Converted schema dict to JSON string for fallback save")
+                elif isinstance(schema_data, str):
+                    # Validate JSON format
+                    import json
+                    try:
+                        json.loads(schema_data)
+                        schema_to_store = schema_data
+                        logger.info(f"Using validated JSON string for fallback save")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON string in fallback save: {e}")
+                        return False
+                else:
+                    logger.error(f"Invalid schema data type for fallback save: {type(schema_data)}")
+                    return False
+                
+                # Save schema data directly
+                connection.db_schema_cache = schema_to_store
+                db.commit()
+                db.refresh(connection)
+                
+                # Verify save
+                if connection.db_schema_cache:
+                    logger.info(f"Fallback schema save successful for connection '{connection.name}'")
+                    return True
+                else:
+                    logger.error(f"Fallback schema save verification failed for connection '{connection.name}'")
+                    return False
+                    
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"Fallback schema save failed for agent '{agent_id}': {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
 
 
 # Create a singleton instance for the application

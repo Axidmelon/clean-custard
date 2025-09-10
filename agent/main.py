@@ -168,7 +168,13 @@ def discover_database_schema() -> Union[Dict[str, Any], str]:
                         
                         # Use SchemaDiscoverer with existing connection to avoid multiple connections
                         discoverer = SchemaDiscoverer(
-                            **DB_CONFIG, schema_name=schema_name, table_filter=table_filter
+                            host=DB_CONFIG["host"],
+                            port=DB_CONFIG["port"],
+                            dbname=DB_CONFIG["dbname"],
+                            user=DB_CONFIG["user"],
+                            password=DB_CONFIG["password"],
+                            schema_name=schema_name,
+                            table_filter=table_filter
                         )
                         
                         start_time = time.time()
