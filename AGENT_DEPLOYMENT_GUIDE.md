@@ -358,6 +358,7 @@ docker rm custard-agent-[name]
 - `DB_USER`: Database username
 - `DB_PASSWORD`: Database password
 - `DB_NAME`: Database name
+- `DB_SSLMODE`: SSL mode for database connection (required for cloud databases like Supabase)
 
 ### Network Requirements
 

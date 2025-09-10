@@ -326,6 +326,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   -e DB_USER="YOUR_READONLY_USER" \\
   -e DB_PASSWORD="YOUR_DB_PASSWORD" \\
   -e DB_NAME="YOUR_DATABASE_NAME" \\
+  -e DB_SSLMODE="require" \\
   ${APP_CONFIG.DOCKER.IMAGE_NAME}`;
     
     try {

@@ -51,6 +51,7 @@ Once the user enters a name and clicks the button, the modal transitions to the 
       -e CUSTOMER_DB_USER="YOUR_READONLY_USER" \
       -e CUSTOMER_DB_PASSWORD="YOUR_DB_PASSWORD" \
       -e CUSTOMER_DB_NAME="postgres" \
+      -e DB_SSLMODE="require" \
       custard/agent:latest
     ```
 
