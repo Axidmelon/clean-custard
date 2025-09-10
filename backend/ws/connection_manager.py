@@ -89,6 +89,7 @@ class ConnectionManager:
         """
         if agent_id not in self.active_connections:
             logger.warning(f"Agent '{agent_id}' not found for message sending")
+            logger.info(f"Currently connected agents: {list(self.active_connections.keys())}")
             return False
 
         try:

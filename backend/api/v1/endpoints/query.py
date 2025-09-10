@@ -83,6 +83,13 @@ async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(
         "sql": generated_sql,
     }
 
+    # Check if agent is connected before sending query
+    if not manager.is_agent_connected(db_connection.agent_id):
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Agent '{db_connection.agent_id}' is not connected. Please ensure the agent is running and connected."
+        )
+
     try:
         agent_response = await manager.send_query_to_agent(
             query=query_payload, agent_id=db_connection.agent_id

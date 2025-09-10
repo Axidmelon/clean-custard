@@ -192,7 +192,7 @@ async def handle_schema_discovery(
         command: Command dictionary
     """
     logger.info("Handling schema discovery request")
-    query_id = command.get("query_id")  # <-- CHANGE 1: Get the query_id from the command
+    query_id = command.get("query_id")
 
     try:
         # Discover the schema using our updated discoverer
@@ -303,8 +303,9 @@ class CustardAgent:
                 logger.warning(f"Unknown command type: {command_type}")
                 # Send error response
                 error_response = {
-                    "type": "ERROR",
-                    "payload": {"error": f"Unknown command type: {command_type}"},
+                    "query_id": command.get("query_id"),
+                    "status": "error",
+                    "error": f"Unknown command type: {command_type}",
                 }
                 await websocket.send(json.dumps(error_response))
 

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 # Import API routers
-from api.v1.endpoints import connection, websocket, status_websocket
+from api.v1.endpoints import connection, websocket, status_websocket, status
 from api.v1.endpoints import query as query_router
 from api.v1.endpoints import test, auth
 
@@ -154,6 +154,7 @@ app.include_router(auth.router, prefix="/api/v1", tags=["Authentication"])
 app.include_router(connection.router, prefix="/api/v1/connections", tags=["Connections"])
 app.include_router(websocket.router, prefix="/api/v1", tags=["WebSocket"])
 app.include_router(status_websocket.router, prefix="/api/v1", tags=["Status WebSocket"])
+app.include_router(status.router, prefix="/api/v1", tags=["Status"])
 app.include_router(query_router.router, prefix="/api/v1", tags=["query"])
 app.include_router(test.router, prefix="/api/v1", tags=["test"])
 
