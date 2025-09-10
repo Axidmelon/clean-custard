@@ -103,7 +103,7 @@ async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(
         raise HTTPException(status_code=502, detail=f"Agent returned an error: {error_detail}")
 
     # 4. Format the raw result from the agent into a human-readable answer
-    final_answer = format_agent_result(agent_response.get("result", []))
+    final_answer = format_agent_result(agent_response.get("data", []))
 
     # 5. Return the final response to the user
     return QueryResponse(answer=final_answer, sql_query=generated_sql)
