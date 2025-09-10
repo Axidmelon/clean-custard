@@ -557,13 +557,13 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
 {`docker run -d \\
   --name custard-agent-${connectionName.toLowerCase().replace(/\s+/g, '-')} \\
   -e CONNECTION_ID="${generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`}" \\
-  -e BACKEND_WEBSOCKET_URI="${generatedWebsocketUrl || `ws://localhost:8000/api/v1/connections/ws/${generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`}`}" \\
+  -e BACKEND_WEBSOCKET_URI="${generatedWebsocketUrl || `${APP_CONFIG.DOCKER.BACKEND_URL}/api/v1/connections/ws/${generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`}`}" \\
   -e DB_HOST="YOUR_${databaseTemplate.name.toUpperCase()}_HOST" \\
   -e DB_PORT="YOUR_DB_PORT" \\
   -e DB_USER="YOUR_READONLY_USER" \\
   -e DB_PASSWORD="YOUR_DB_PASSWORD" \\
   -e DB_NAME="postgres" \\
-  custard/agent:latest`}
+  ${APP_CONFIG.DOCKER.IMAGE_NAME}`}
               </pre>
             </div>
           </div>
