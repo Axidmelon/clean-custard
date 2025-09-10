@@ -1,13 +1,11 @@
 import { Database, Layers, GitBranch, CheckCircle, Snowflake, Loader2, AlertCircle } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { useForm } from "react-hook-form";
-import { useState, useEffect } from "react";
-import { CreateConnectionRequest, Connection as ApiConnection, Connection } from "@/types/api";
+import { useState } from "react";
+import { CreateConnectionRequest, Connection } from "@/types/api";
 import { useConnectionsWithDetails, useCreateConnection, useDeleteConnection, useConnectionStatus } from "@/hooks/useConnections";
 import { useWebSocketConnectionStatus } from "@/hooks/useWebSocketStatus";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -23,24 +21,6 @@ interface DatabaseTemplate {
   db_type: string;
 }
 
-interface DatabaseCredentials {
-  host?: string;
-  port?: string;
-  username?: string;
-  password?: string;
-  database?: string;
-  projectId?: string;
-  keyFile?: string;
-  accountId?: string;
-  warehouseName?: string;
-  catalog?: string;
-  schema?: string;
-  clusterId?: string;
-  httpPath?: string;
-  apiKey?: string;
-  region?: string;
-  connectionName?: string;
-}
 
 const databaseTemplates: DatabaseTemplate[] = [
   {
@@ -113,48 +93,6 @@ GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE PUBLIC;`;
   }
 };
 
-// Database credential form fields configuration
-const getCredentialFields = (dbType: string): { field: keyof DatabaseCredentials; label: string; type: string; placeholder: string; required: boolean }[] => {
-  switch (dbType) {
-    case 'mysql':
-      return [
-        { field: 'host', label: 'Host', type: 'text', placeholder: 'localhost', required: true },
-        { field: 'port', label: 'Port', type: 'text', placeholder: APP_CONFIG.DB_PORTS.MYSQL.toString(), required: true },
-        { field: 'database', label: 'Database', type: 'text', placeholder: 'my_database', required: true },
-        { field: 'username', label: 'Username', type: 'text', placeholder: 'username', required: true },
-        { field: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true }
-      ];
-    case 'supabase':
-      return [
-        { field: 'host', label: 'Database URL', type: 'text', placeholder: 'db.xyz.supabase.co', required: true },
-        { field: 'database', label: 'Database Name', type: 'text', placeholder: 'postgres', required: true },
-        { field: 'username', label: 'Username', type: 'text', placeholder: 'postgres', required: true },
-        { field: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true },
-        { field: 'port', label: 'Port', type: 'text', placeholder: APP_CONFIG.DB_PORTS.POSTGRES.toString(), required: true }
-      ];
-    case 'snowflake':
-      return [
-        { field: 'accountId', label: 'Account Identifier', type: 'text', placeholder: 'xy12345.us-east-1', required: true },
-        { field: 'username', label: 'Username', type: 'text', placeholder: 'username', required: true },
-        { field: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true },
-        { field: 'warehouseName', label: 'Warehouse', type: 'text', placeholder: 'COMPUTE_WH', required: true },
-        { field: 'database', label: 'Database', type: 'text', placeholder: 'MY_DATABASE', required: false },
-        { field: 'schema', label: 'Schema', type: 'text', placeholder: 'PUBLIC', required: false }
-      ];
-    case 'mongodb':
-      return [
-        { field: 'host', label: 'Connection String', type: 'text', placeholder: `mongodb://localhost:${APP_CONFIG.DB_PORTS.MONGODB}`, required: true },
-        { field: 'database', label: 'Database Name', type: 'text', placeholder: 'my_database', required: true },
-        { field: 'username', label: 'Username', type: 'text', placeholder: 'username', required: false },
-        { field: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: false }
-      ];
-    default:
-      return [
-        { field: 'connectionName', label: 'Connection Name', type: 'text', placeholder: 'My Connection', required: true },
-        { field: 'apiKey', label: 'API Key', type: 'password', placeholder: 'Enter API key...', required: true }
-      ];
-  }
-};
 
 // Connection Form Component with Step 1: Name Your Connection
 function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTemplate }) {
@@ -166,9 +104,6 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   const [generatedConnectionId, setGeneratedConnectionId] = useState<string>('');
   const [generatedWebsocketUrl, setGeneratedWebsocketUrl] = useState<string>('');
   
-  const form = useForm<DatabaseCredentials>({
-    defaultValues: {}
-  });
 
   const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -223,17 +158,6 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
     }
   };
 
-  const handleStep2Submit = async (data: DatabaseCredentials) => {
-    try {
-      // This would be the actual connection logic for Step 2
-      // For now, we'll just show the generated command
-      logUserAction('Step 2 credentials submitted', data);
-    } catch (error) {
-      logError('Step 2 connection error', error);
-    }
-  };
-
-  const fields = getCredentialFields(databaseTemplate.id);
 
   // Step 1: Name Your Connection
   if (currentStep === 1) {
@@ -380,158 +304,69 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   logDebug('Step 2 - Connection name:', connectionName);
 
   return (
-    <div className="space-y-6">
+    <div className="max-h-[80vh] overflow-y-auto">
       {/* Header */}
-      <div className="text-center">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-          Run the Secure Connector Agent
-        </h3>
-        <p className="text-sm text-gray-600">
-          Set up a secure connection to your database using our lightweight agent.
-        </p>
+      <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 -mx-6 mb-6">
+        <div className="text-center">
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">
+            Run the Secure Connector Agent
+          </h3>
+          <p className="text-sm text-gray-600">
+            Set up a secure connection to your database using our lightweight agent.
+          </p>
+        </div>
       </div>
       
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Left Panel - Information */}
-        <div className="space-y-6">
-          {/* Security Info */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-gray-900">Security & Setup</h4>
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <div className="flex items-start space-x-3">
-                <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <CheckCircle className="w-3 h-3 text-green-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-green-800 font-medium mb-1">Secure by Design</p>
-                  <p className="text-xs text-green-700">
-                    Your database credentials never leave your network. The agent runs locally and only sends encrypted metadata to Custard.
-                  </p>
-                </div>
-              </div>
+      {/* Scrollable Content */}
+      <div className="space-y-6 px-1">
+        {/* Security Info */}
+        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-5 shadow-sm">
+          <div className="flex items-start space-x-4">
+            <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <CheckCircle className="w-5 h-5 text-green-600" />
             </div>
-          </div>
-
-          {/* Setup Requirements */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-gray-900">⚠️ Setup Requirements</h4>
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <div className="flex items-start space-x-3">
-                <div className="w-5 h-5 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <AlertCircle className="w-3 h-3 text-yellow-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-yellow-800 font-medium mb-2">Docker Command Alone is NOT Sufficient</p>
-                  <div className="text-xs text-yellow-700 space-y-1">
-                    <p>Before running the command below, you must:</p>
-                    <ul className="list-disc list-inside space-y-1 ml-2">
-                      <li>Configure your firewall to allow outbound HTTPS (port 443)</li>
-                      <li>Create a read-only database user</li>
-                      <li>Ensure database accessibility from Docker</li>
-                      <li>Test network connectivity</li>
-                    </ul>
-                    <a 
-                      href="/docs/agent-deployment" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-yellow-600 hover:text-yellow-800 underline font-medium"
-                    >
-                      View complete setup guide →
-                    </a>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Database User Setup */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-gray-900">Create Read-Only Database User</h4>
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <div className="flex items-start space-x-3">
-                <div className="w-5 h-5 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <AlertCircle className="w-3 h-3 text-red-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-red-800 font-medium mb-2">CRITICAL: Create Read-Only User</p>
-                  <div className="text-xs text-red-700 space-y-2">
-                    <p>Never use admin/root database users. Create a dedicated read-only user:</p>
-                    <details className="group">
-                      <summary className="cursor-pointer font-medium group-open:text-red-900">
-                        Show {databaseTemplate.name} commands
-                      </summary>
-                      <div className="mt-2 bg-red-100 p-2 rounded">
-                        <pre className="text-xs whitespace-pre-wrap">
-{getDatabaseUserCommands(databaseTemplate.db_type)}
-                        </pre>
-                      </div>
-                    </details>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Tests */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-gray-900">Quick Tests</h4>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <details className="group">
-                <summary className="cursor-pointer text-sm text-gray-700 font-medium group-open:text-gray-900">
-                  Test connectivity before deployment
-                </summary>
-                <div className="mt-3 space-y-2">
-                  <div className="text-xs text-gray-600">
-                    <p className="font-medium mb-1">Test internet access:</p>
-                    <code className="bg-gray-100 px-2 py-1 rounded text-xs">docker run --rm alpine ping -c 3 8.8.8.8</code>
-                  </div>
-                  <div className="text-xs text-gray-600">
-                    <p className="font-medium mb-1">Test backend connectivity:</p>
-                    <code className="bg-gray-100 px-2 py-1 rounded text-xs">curl -I https://your-backend.railway.app/health</code>
-                  </div>
-                  <div className="text-xs text-gray-600">
-                    <p className="font-medium mb-1">Test database connectivity:</p>
-                    <code className="bg-gray-100 px-2 py-1 rounded text-xs">docker run --rm postgres:15-alpine pg_isready -h YOUR_DB_HOST -p 5432</code>
-                  </div>
-                </div>
-              </details>
-            </div>
-          </div>
-
-          {/* Help Section */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-gray-900">{helpInfo.title}</h4>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-sm text-blue-800 mb-3">
-                {helpInfo.content}
+            <div>
+              <h4 className="text-sm font-semibold text-green-900 mb-2">Secure by Design</h4>
+              <p className="text-sm text-green-800">
+                Your database credentials never leave your network. The agent runs locally and only sends encrypted metadata to Custard.
               </p>
-              <a 
-                href={helpInfo.link} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:text-blue-800 underline font-medium"
-              >
-                View documentation →
-              </a>
             </div>
           </div>
-          
-          {/* Connection Status */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-gray-900">Connection Status</h4>
-            <div className="flex items-center p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-center space-x-3">
-                <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
-                <span className="text-sm font-medium text-yellow-800">Waiting for connection...</span>
+        </div>
+
+        {/* Setup Requirements */}
+        <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-5 shadow-sm">
+          <div className="flex items-start space-x-4">
+            <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-5 h-5 text-yellow-600" />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-semibold text-yellow-900 mb-2">⚠️ Setup Requirements</h4>
+              <p className="text-sm text-yellow-800 font-medium mb-3">Docker Command Alone is NOT Sufficient</p>
+              <div className="text-sm text-yellow-700 space-y-2">
+                <p>Before running the command below, you must:</p>
+                <ul className="list-disc list-inside space-y-1 ml-4">
+                  <li>Configure your firewall to allow outbound HTTPS (port 443)</li>
+                  <li>Create a read-only database user</li>
+                  <li>Ensure database accessibility from Docker</li>
+                  <li>Test network connectivity</li>
+                </ul>
+                <a 
+                  href="/docs/agent-deployment" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center text-yellow-600 hover:text-yellow-800 underline font-medium text-sm"
+                >
+                  View complete setup guide →
+                </a>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Panel - Command Snippet */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
+        {/* Generated Command Section */}
+        <div className="bg-gradient-to-r from-gray-50 to-slate-50 border border-gray-200 rounded-xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h4 className="text-sm font-semibold text-gray-900">Generated Command</h4>
               <p className="text-xs text-gray-500 mt-1">
@@ -542,7 +377,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
               <Button 
                 size="sm" 
                 variant="outline" 
-                className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                className="text-blue-600 border-blue-300 hover:bg-blue-50 shadow-sm"
                 onClick={() => window.open('/docs/agent-deployment', '_blank')}
               >
                 Setup Guide
@@ -550,7 +385,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
               <Button 
                 size="sm" 
                 variant="outline" 
-                className="text-gray-600 border-gray-300 hover:bg-gray-50"
+                className="text-gray-600 border-gray-300 hover:bg-gray-50 shadow-sm"
                 onClick={handleCopyCommand}
               >
                 Copy
@@ -558,13 +393,13 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
             </div>
           </div>
           
-          <div className="bg-gray-900 text-gray-100 rounded-lg border overflow-hidden">
-            <div className="bg-gray-800 px-4 py-2 border-b border-gray-700">
+          <div className="bg-gray-900 text-gray-100 rounded-lg border overflow-hidden shadow-lg">
+            <div className="bg-gray-800 px-4 py-3 border-b border-gray-700">
               <div className="flex items-center space-x-2">
                 <div className="w-2 h-2 bg-red-400 rounded-full"></div>
                 <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
                 <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-                <span className="text-xs text-gray-400 ml-2">Terminal</span>
+                <span className="text-xs text-gray-400 ml-2 font-medium">Terminal</span>
               </div>
             </div>
             <div className="p-4">
@@ -586,49 +421,130 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
             </div>
           </div>
           
-          <div className="text-xs text-gray-500 space-y-1">
+          <div className="mt-4 text-xs text-gray-500 space-y-1">
             <p>• Run this command in your server environment</p>
             <p>• Ensure Docker is installed and running</p>
             <p>• Replace placeholder values with your actual credentials</p>
             <p>• <code className="bg-gray-100 px-1 rounded">DB_SSLMODE="require"</code> is set for secure database connections (required for Supabase)</p>
           </div>
-          
-          {/* Post-Deployment Verification */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-gray-900">After Running the Command</h4>
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <div className="text-xs text-green-700 space-y-1">
-                <p className="font-medium">Check these logs for success:</p>
-                <code className="bg-green-100 px-2 py-1 rounded text-xs block">
-                  ✅ Successfully connected to Custard backend
-                </code>
-                <code className="bg-green-100 px-2 py-1 rounded text-xs block">
-                  Database schema discovery completed
-                </code>
-                <p className="mt-2">Then verify connection status in your dashboard.</p>
+        </div>
+
+        {/* Database User Setup */}
+        <div className="bg-gradient-to-r from-red-50 to-rose-50 border border-red-200 rounded-xl p-5 shadow-sm">
+          <div className="flex items-start space-x-4">
+            <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-5 h-5 text-red-600" />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-semibold text-red-900 mb-2">Create Read-Only Database User</h4>
+              <p className="text-sm text-red-800 font-medium mb-3">CRITICAL: Create Read-Only User</p>
+              <div className="text-sm text-red-700 space-y-3">
+                <p>Never use admin/root database users. Create a dedicated read-only user:</p>
+                <details className="group">
+                  <summary className="cursor-pointer font-medium group-open:text-red-900 text-sm">
+                    Show {databaseTemplate.name} commands
+                  </summary>
+                  <div className="mt-3 bg-red-100 p-3 rounded-lg">
+                    <pre className="text-xs whitespace-pre-wrap font-mono">
+{getDatabaseUserCommands(databaseTemplate.db_type)}
+                    </pre>
+                  </div>
+                </details>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Quick Tests */}
+        <div className="bg-gradient-to-r from-gray-50 to-slate-50 border border-gray-200 rounded-xl p-5 shadow-sm">
+          <h4 className="text-sm font-semibold text-gray-900 mb-3">Quick Tests</h4>
+          <details className="group">
+            <summary className="cursor-pointer text-sm text-gray-700 font-medium group-open:text-gray-900">
+              Test connectivity before deployment
+            </summary>
+            <div className="mt-4 space-y-3">
+              <div className="text-sm text-gray-600">
+                <p className="font-medium mb-2">Test internet access:</p>
+                <code className="bg-gray-100 px-3 py-2 rounded text-xs font-mono block">docker run --rm alpine ping -c 3 8.8.8.8</code>
+              </div>
+              <div className="text-sm text-gray-600">
+                <p className="font-medium mb-2">Test backend connectivity:</p>
+                <code className="bg-gray-100 px-3 py-2 rounded text-xs font-mono block">curl -I https://your-backend.railway.app/health</code>
+              </div>
+              <div className="text-sm text-gray-600">
+                <p className="font-medium mb-2">Test database connectivity:</p>
+                <code className="bg-gray-100 px-3 py-2 rounded text-xs font-mono block">docker run --rm postgres:15-alpine pg_isready -h YOUR_DB_HOST -p 5432</code>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        {/* Help Section */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 shadow-sm">
+          <h4 className="text-sm font-semibold text-blue-900 mb-3">{helpInfo.title}</h4>
+          <p className="text-sm text-blue-800 mb-3">
+            {helpInfo.content}
+          </p>
+          <a 
+            href={helpInfo.link} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 underline font-medium"
+          >
+            View documentation →
+          </a>
+        </div>
+        
+        {/* Connection Status */}
+        <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-5 shadow-sm">
+          <h4 className="text-sm font-semibold text-gray-900 mb-3">Connection Status</h4>
+          <div className="flex items-center p-4 bg-yellow-100 border border-yellow-300 rounded-lg">
+            <div className="flex items-center space-x-3">
+              <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
+              <span className="text-sm font-medium text-yellow-800">Waiting for connection...</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Post-Deployment Verification */}
+        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-5 shadow-sm">
+          <h4 className="text-sm font-semibold text-green-900 mb-3">After Running the Command</h4>
+          <div className="text-sm text-green-700 space-y-2">
+            <p className="font-medium">Check these logs for success:</p>
+            <div className="space-y-2">
+              <code className="bg-green-100 px-3 py-2 rounded text-xs font-mono block">
+                ✅ Successfully connected to Custard backend
+              </code>
+              <code className="bg-green-100 px-3 py-2 rounded text-xs font-mono block">
+                Database schema discovery completed
+              </code>
+            </div>
+            <p className="mt-3">Then verify connection status in your dashboard.</p>
+          </div>
+        </div>
       </div>
       
-      <DialogFooter>
-        <Button 
-          variant="outline" 
-          onClick={() => setCurrentStep(1)}
-          disabled={createConnectionMutation.isPending}
-        >
-          Back
-        </Button>
-        <DialogClose asChild>
+      {/* Sticky Footer */}
+      <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 -mx-6 mt-6">
+        <div className="flex justify-between">
           <Button 
-            className="bg-blue-600 hover:bg-blue-700 text-white"
+            variant="outline" 
+            onClick={() => setCurrentStep(1)}
             disabled={createConnectionMutation.isPending}
+            className="shadow-sm"
           >
-            Done - View Connection
+            Back
           </Button>
-        </DialogClose>
-      </DialogFooter>
+          <DialogClose asChild>
+            <Button 
+              className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+              disabled={createConnectionMutation.isPending}
+            >
+              Done - View Connection
+            </Button>
+          </DialogClose>
+        </div>
+      </div>
     </div>
   );
 }
@@ -670,7 +586,7 @@ function DatabaseCard({ databaseTemplate }: { databaseTemplate: DatabaseTemplate
                   Connect
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[800px]">
+              <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-hidden">
                 <DialogHeader>
                   <DialogTitle>Connect to {databaseTemplate.name}</DialogTitle>
                   <DialogDescription>
@@ -741,20 +657,12 @@ function SimpleConnectionCard({ connection, onDelete }: {
     return template?.icon || Database;
   };
   
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  };
 
   // Use real-time status check with WebSocket and polling fallback
   const { 
     data: statusData, 
     isLoading: statusLoading, 
-    isWebSocketConnected, 
-    reconnect 
+    isWebSocketConnected
   } = useConnectionStatus(connection.id);
 
   const getStatusInfo = (isConnected: boolean | null | undefined, isLoading: boolean, wsConnected: boolean) => {
