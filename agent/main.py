@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 # Import the SchemaDiscoverer tool
 from schema_discoverer import SchemaDiscoverer
 
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -32,7 +33,11 @@ DB_CONFIG = {
     "dbname": os.getenv("DB_NAME"),
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
-    "sslmode": os.getenv("DB_SSLMODE", "prefer"),  # Default to 'prefer' if not set
+    "sslmode": os.getenv("DB_SSLMODE", "require"),  # Use 'require' for Supabase
+    "connect_timeout": 10,  # Connection timeout
+    "application_name": "custard-agent",  # Application name for connection identification
+    "gssencmode": "disable",  # Disable GSS encryption mode
+    "options": "-c default_transaction_isolation=read committed",  # Set transaction isolation
 }
 
 # Validate required environment variables
@@ -123,7 +128,7 @@ def execute_sql_query(sql_query: str) -> Dict[str, Any]:
 
 def discover_database_schema() -> Union[Dict[str, Any], str]:
     """
-    Discover the database schema using SchemaDiscoverer.
+    Discover the database schema using SchemaDiscoverer with SASL authentication fixes.
 
     Returns:
         Dictionary representation of the database schema on success,
@@ -139,18 +144,6 @@ def discover_database_schema() -> Union[Dict[str, Any], str]:
             logger.error(error_msg)
             return f"Schema discovery failed: {error_msg}"
         
-        # Test database connection before schema discovery
-        logger.info("Testing database connection...")
-        try:
-            with psycopg2.connect(**DB_CONFIG) as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-                    logger.info("✓ Database connection successful")
-        except psycopg2.Error as e:
-            error_msg = f"Database connection failed: {e}"
-            logger.error(error_msg)
-            return f"Schema discovery failed: {error_msg}"
-        
         # Get schema configuration from environment variables
         schema_name = os.getenv("SCHEMA_NAME", "public")
         table_filter = os.getenv("TABLE_FILTER")
@@ -160,18 +153,61 @@ def discover_database_schema() -> Union[Dict[str, Any], str]:
 
         logger.info(f"Discovering schema for database: {DB_CONFIG['dbname']}, schema: {schema_name}")
         
-        discoverer = SchemaDiscoverer(
-            **DB_CONFIG, schema_name=schema_name, table_filter=table_filter
-        )
+        # Use a single connection for schema discovery with retry logic to avoid SASL issues
+        logger.info("Connecting to database for schema discovery...")
+        max_retries = 3
+        current_config = DB_CONFIG.copy()
         
-        # No timeout - let schema discovery take as long as needed
-        # The backend will handle timeouts for the save operation
-        start_time = time.time()
-        schema = discoverer.discover_schema()
-        discovery_time = time.time() - start_time
-        
-        logger.info(f"✓ Database schema discovery completed successfully in {discovery_time:.2f} seconds")
-        return schema
+        for attempt in range(max_retries):
+            try:
+                with psycopg2.connect(**current_config) as conn:
+                    with conn.cursor() as cur:
+                        # Test connection first
+                        cur.execute("SELECT 1")
+                        logger.info("✓ Database connection successful")
+                        
+                        # Use SchemaDiscoverer with existing connection to avoid multiple connections
+                        discoverer = SchemaDiscoverer(
+                            **DB_CONFIG, schema_name=schema_name, table_filter=table_filter
+                        )
+                        
+                        start_time = time.time()
+                        schema = discoverer.discover_schema_with_connection(conn)
+                        discovery_time = time.time() - start_time
+                        
+                        logger.info(f"✓ Database schema discovery completed successfully in {discovery_time:.2f} seconds")
+                        return schema
+                            
+            except psycopg2.OperationalError as e:
+                error_str = str(e)
+                if "duplicate SASL authentication request" in error_str:
+                    logger.warning(f"Connection attempt {attempt + 1} failed with SASL error: {error_str}")
+                    if attempt < max_retries - 1:
+                        # Try alternative configuration on first retry
+                        if attempt == 0:
+                            logger.info("Trying alternative configuration...")
+                            current_config = DB_CONFIG.copy()
+                            current_config.update({
+                                "sslmode": "prefer",
+                                "gssencmode": "disable",
+                                "connect_timeout": 30,
+                            })
+                        logger.warning("Retrying connection in 2 seconds...")
+                        time.sleep(2)  # Wait 2 seconds before retry
+                        continue
+                    else:
+                        logger.error("All connection attempts failed with SASL error")
+                        raise
+                else:
+                    logger.error(f"Operational error: {error_str}")
+                    raise
+            except psycopg2.DatabaseError as e:
+                logger.error(f"Database error: {e}")
+                raise
+            except psycopg2.Error as e:
+                error_msg = f"Database connection failed: {e}"
+                logger.error(error_msg)
+                return f"Schema discovery failed: {error_msg}"
             
     except Exception as e:
         logger.error(f"Schema discovery failed: {e}")
@@ -199,9 +235,9 @@ async def handle_sql_query(
     if not sql or not query_id:
         logger.error("Missing 'sql' or 'query_id' in request")
         response = {
-            "type": "SQL_QUERY_RESPONSE",
             "query_id": query_id,
-            "payload": {"error": "Missing required fields: sql or query_id"},
+            "status": "error",
+            "error": "Missing required fields: sql or query_id",
         }
         await websocket.send(json.dumps(response, default=str))
         return
@@ -209,7 +245,21 @@ async def handle_sql_query(
     # Execute the query
     result_payload = execute_sql_query(sql)
 
-    response = {"query_id": query_id, "status": "success", "result": result_payload.get("data", [])}
+    # Check if query execution failed
+    if "error" in result_payload:
+        response = {
+            "query_id": query_id,
+            "status": "error",
+            "error": result_payload["error"]
+        }
+    else:
+        response = {
+            "query_id": query_id,
+            "status": "success",
+            "data": result_payload.get("data", []),
+            "columns": result_payload.get("columns", []),
+            "row_count": result_payload.get("row_count", 0)
+        }
 
     await websocket.send(json.dumps(response, default=str))
     logger.info(f"SQL query response sent for query_id: {query_id}")

@@ -343,7 +343,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
       case 'SUPABASE':
         return {
           title: "Where to find these values in Supabase:",
-          content: "Log in to your Supabase dashboard, go to **Project Settings > Database**. Use the 'Connection Info' details. We strongly recommend creating a dedicated, **read-only** user for Custard.",
+          content: "Log in to your Supabase dashboard, go to **Project Settings > Database**. Use the 'Connection Info' details. We strongly recommend creating a dedicated, **read-only** user for Custard. **Note**: SSL is required for Supabase connections (already configured in the Docker command).",
           link: APP_CONFIG.DOCUMENTATION.SUPABASE
         };
       case 'SNOWFLAKE':
@@ -580,6 +580,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   -e DB_USER="YOUR_READONLY_USER" \\
   -e DB_PASSWORD="YOUR_DB_PASSWORD" \\
   -e DB_NAME="postgres" \\
+  -e DB_SSLMODE="require" \\
   ${APP_CONFIG.DOCKER.IMAGE_NAME}`}
               </pre>
             </div>
@@ -589,6 +590,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
             <p>• Run this command in your server environment</p>
             <p>• Ensure Docker is installed and running</p>
             <p>• Replace placeholder values with your actual credentials</p>
+            <p>• <code className="bg-gray-100 px-1 rounded">DB_SSLMODE="require"</code> is set for secure database connections (required for Supabase)</p>
           </div>
           
           {/* Post-Deployment Verification */}

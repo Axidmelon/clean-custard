@@ -45,7 +45,7 @@ class SchemaDiscoverer:
         else:
             return query + " ORDER BY table_name, ordinal_position;"
 
-    def discover_schema(self) -> Dict[str, Any]:  # <-- CHANGE 1: Return type is now a dictionary
+    def discover_schema(self) -> Dict[str, Any]:
         """
         Connects to the database and returns a structured dictionary of the schema.
         """
@@ -63,14 +63,36 @@ class SchemaDiscoverer:
                         cursor.execute(query, (self.schema_name,))
                     results = cursor.fetchall()
             print("Successfully fetched schema information.")
-            # <-- CHANGE 2: Call the new formatting function
             return self._format_schema_as_dict(results)
         except psycopg2.Error as e:
             print(f"ERROR: Could not connect to the database. {e}")
             # Raise an exception so the caller can handle it
             raise ConnectionError(f"Could not connect to the database: {e}")
 
-    def _format_schema_as_dict(self, results: list) -> Dict[str, Any]:  # <-- CHANGE 3: New function
+    def discover_schema_with_connection(self, conn) -> Dict[str, Any]:
+        """
+        Uses an existing database connection to discover schema and returns a structured dictionary.
+        This avoids creating multiple connections which can cause SASL authentication issues.
+        """
+        # Build the query dynamically based on configuration
+        query = self._build_schema_query()
+
+        try:
+            print("Discovering schema using existing connection...")
+            with conn.cursor() as cursor:
+                # Execute query with parameters
+                if self.table_filter:
+                    cursor.execute(query, (self.schema_name, tuple(self.table_filter)))
+                else:
+                    cursor.execute(query, (self.schema_name,))
+                results = cursor.fetchall()
+            print("Successfully fetched schema information.")
+            return self._format_schema_as_dict(results)
+        except psycopg2.Error as e:
+            print(f"ERROR: Could not discover schema. {e}")
+            raise ConnectionError(f"Could not discover schema: {e}")
+
+    def _format_schema_as_dict(self, results: list) -> Dict[str, Any]:
         """
         Private helper method to format the raw schema into a dictionary.
         This is perfect for converting to JSON.
