@@ -40,7 +40,11 @@
 - **Connection Module** (`/backend/api/v1/endpoints/connection.py`) - Database connection management, CRUD operations
 - **Query Module** (`/backend/api/v1/endpoints/query.py`) - Natural language query processing with LLM integration
 - **WebSocket Module** (`/backend/ws/connection_manager.py`) - Real-time communication with agents
+- **WebSocket Status Module** (`/backend/api/v1/endpoints/status_websocket.py`) - WebSocket status monitoring endpoint
+- **CORS Module** (`/backend/core/websocket_cors.py`) - WebSocket CORS configuration
+- **Schema Monitor** (`/backend/monitor_schema.py`) - Database schema monitoring and change tracking
 - **Frontend Pages** (`/frontend/src/pages/`) - Dashboard, Connections, Login, Signup, Settings, TalkData
+- **WebSocket Status Hook** (`/frontend/src/hooks/useWebSocketStatus.ts`) - React hook for WebSocket status management
 
 **Data Layer**:
 - **Database Models** (`/backend/db/models.py`) - SQLAlchemy models for users, organizations, connections
@@ -77,6 +81,7 @@
 - **Connections**: `/api/v1/connections` (GET, POST), `/api/v1/connections/{id}` (GET, DELETE), `/api/v1/connections/{id}/refresh-schema` (POST)
 - **Queries**: `/api/v1/query` (POST)
 - **WebSocket**: `/api/v1/connections/ws/{agent_id}` (WebSocket)
+- **WebSocket Status**: `/api/v1/websocket/status` (GET) - Real-time WebSocket connection status
 - **Health**: `/health`, `/status`
 
 **Configuration Files**:
@@ -139,6 +144,11 @@
 - **LLM Plugins** - Add custom prompt templates and processing logic
 
 **Recent Changes**:
+- **WebSocket Status Monitoring** (Commit 1f80659): Added real-time WebSocket status monitoring with dedicated endpoint and React hook
+- **CORS Configuration**: Implemented comprehensive WebSocket CORS configuration with detailed documentation
+- **Schema Monitoring**: Added database schema monitoring capabilities for change tracking
+- **Enhanced Connection Management**: Updated WebSocket connection manager with improved status tracking
+- **Frontend Integration**: Added useWebSocketStatus hook for reactive WebSocket status management
 - Connections page transformed into production-ready application with real-time data fetching
 - Added comprehensive error handling and loading states
 - Implemented React Query for efficient data fetching and caching
