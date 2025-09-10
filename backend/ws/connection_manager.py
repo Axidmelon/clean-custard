@@ -182,6 +182,14 @@ class ConnectionManager:
             query_id = message["query_id"]
             logger.info(f"Processing response for query_id '{query_id}' from agent '{agent_id}'")
             self.handle_response(query_id, message)
+            
+            # Special handling for late schema discovery responses
+            if (message.get("status") == "success" and 
+                "schema" in message and 
+                query_id not in self.response_events):
+                logger.warning(f"Late schema discovery response received for query '{query_id}' - attempting to process")
+                # Try to process the schema even if the original request timed out
+                await self._handle_late_schema_response(agent_id, message)
         else:
             logger.debug(f"No query_id in message from agent '{agent_id}': {message}")
 
@@ -274,8 +282,8 @@ class ConnectionManager:
             logger.info(f"Sending schema discovery command: {command}")
             
             # Send command to the agent and wait for a response
-            # Use a reasonable timeout for schema discovery (agent responds in ~3 seconds)
-            response = await self.send_query_to_agent(command, agent_id, timeout=10)
+            # Use a reasonable timeout for schema discovery (agent responds in ~3 seconds, but allow buffer)
+            response = await self.send_query_to_agent(command, agent_id, timeout=15)
             
             logger.info(f"Schema discovery response received: {response}")
             
@@ -711,6 +719,35 @@ class ConnectionManager:
             await broadcast_agent_status_update(agent_id, agent_connected)
         except Exception as e:
             logger.error(f"Failed to broadcast agent status update for {agent_id}: {e}")
+
+    async def _handle_late_schema_response(self, agent_id: str, message: Dict[str, Any]) -> None:
+        """
+        Handle a late schema discovery response that arrived after timeout.
+        
+        Args:
+            agent_id: Agent identifier
+            message: The late response message containing schema data
+        """
+        try:
+            logger.info(f"Processing late schema response for agent '{agent_id}'")
+            
+            schema_data = message.get("schema")
+            if not schema_data:
+                logger.warning(f"No schema data in late response for agent '{agent_id}'")
+                return
+            
+            # Try to save the schema using fallback method
+            success = await self.save_schema_fallback(agent_id, schema_data)
+            
+            if success:
+                logger.info(f"Successfully processed late schema response for agent '{agent_id}'")
+            else:
+                logger.error(f"Failed to process late schema response for agent '{agent_id}'")
+                
+        except Exception as e:
+            logger.error(f"Error handling late schema response for agent '{agent_id}': {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
     async def save_schema_fallback(self, agent_id: str, schema_data: Dict[str, Any]) -> bool:
         """
