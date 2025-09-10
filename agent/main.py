@@ -7,7 +7,7 @@ import websockets
 import json
 import psycopg2
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from dotenv import load_dotenv
 
 # Import the SchemaDiscoverer tool
@@ -121,12 +121,13 @@ def execute_sql_query(sql_query: str) -> Dict[str, Any]:
         return {"error": f"Unexpected error: {e}", "query": sql_query}
 
 
-def discover_database_schema() -> str:
+def discover_database_schema() -> Union[Dict[str, Any], str]:
     """
     Discover the database schema using SchemaDiscoverer.
 
     Returns:
-        String representation of the database schema
+        Dictionary representation of the database schema on success,
+        or error string on failure
     """
     try:
         logger.info("Starting database schema discovery...")

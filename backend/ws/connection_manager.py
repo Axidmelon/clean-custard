@@ -348,15 +348,16 @@ class ConnectionManager:
             agent_id: Agent identifier for logging
         """
         try:
-            # Convert schema data to JSON string if it's a dict
-            if isinstance(schema_data, dict):
+            # The db_schema_cache column is JSON type, so we should store the dict directly
+            # SQLAlchemy will handle the JSON serialization automatically
+            if isinstance(schema_data, str):
                 import json
-                schema_json = json.dumps(schema_data)
+                schema_dict = json.loads(schema_data)
             else:
-                schema_json = schema_data
+                schema_dict = schema_data
                 
-            # Update the connection with the schema data
-            connection.db_schema_cache = schema_json
+            # Update the connection with the schema data (store as dict, not string)
+            connection.db_schema_cache = schema_dict
             db.commit()
             db.refresh(connection)
             
