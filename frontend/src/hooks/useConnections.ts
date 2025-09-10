@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { connectionService } from '@/services/connectionService';
 import { 
   Connection, 
-  ConnectionWithDetails, 
   CreateConnectionRequest 
 } from '@/types/api';
 import { APP_CONFIG } from '@/lib/constants';
@@ -53,8 +52,18 @@ export function useConnection(connectionId: string) {
 export function useConnectionStatus(connectionId: string) {
   const [useWebSocket, setUseWebSocket] = useState(true);
   
-  // WebSocket status hook
-  const { agentConnected: wsAgentConnected, isWebSocketConnected, reconnect } = useWebSocketStatus(connectionId);
+  // Get the connection to extract agent_id
+  const { data: connection } = useQuery({
+    queryKey: QUERY_KEYS.connection(connectionId),
+    queryFn: () => connectionService.getConnection(connectionId),
+    enabled: !!connectionId,
+    staleTime: APP_CONFIG.CACHE_TIMES.CONNECTIONS,
+  });
+  
+  // WebSocket status hook - use agent_id if available, otherwise fall back to connectionId
+  const agentId = connection?.agent_id || connectionId;
+  logDebug(`useConnectionStatus: connectionId=${connectionId}, agentId=${agentId}, connection=${connection?.name}`);
+  const { agentConnected: wsAgentConnected, isWebSocketConnected, reconnect } = useWebSocketStatus(agentId);
   
   // Polling fallback query
   const pollingQuery = useQuery({

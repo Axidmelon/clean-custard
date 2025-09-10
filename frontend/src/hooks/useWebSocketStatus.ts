@@ -83,9 +83,15 @@ class WebSocketStatusManagerImpl implements WebSocketStatusManager {
   private handleMessage(data: any) {
     if (data.type === 'AGENT_STATUS_UPDATE') {
       const { agent_id, agentConnected } = data;
+      logDebug(`WebSocket status update received: agent_id=${agent_id}, agentConnected=${agentConnected}`);
+      logDebug(`Current subscribers: ${Array.from(this.subscribers.keys()).join(', ')}`);
+      
       const callbacks = this.subscribers.get(agent_id);
       if (callbacks) {
+        logDebug(`Found ${callbacks.size} callbacks for agent_id=${agent_id}`);
         callbacks.forEach(callback => callback(agentConnected));
+      } else {
+        logDebug(`No callbacks found for agent_id=${agent_id}`);
       }
     }
   }
@@ -115,11 +121,14 @@ class WebSocketStatusManagerImpl implements WebSocketStatusManager {
   }
 
   subscribe(connectionId: string, callback: (isConnected: boolean) => void): () => void {
+    logDebug(`Subscribing to status updates for connectionId: ${connectionId}`);
+    
     if (!this.subscribers.has(connectionId)) {
       this.subscribers.set(connectionId, new Set());
     }
     
     this.subscribers.get(connectionId)!.add(callback);
+    logDebug(`Total subscribers for ${connectionId}: ${this.subscribers.get(connectionId)!.size}`);
 
     // Return unsubscribe function
     return () => {
@@ -128,6 +137,9 @@ class WebSocketStatusManagerImpl implements WebSocketStatusManager {
         callbacks.delete(callback);
         if (callbacks.size === 0) {
           this.subscribers.delete(connectionId);
+          logDebug(`Unsubscribed and removed connectionId: ${connectionId}`);
+        } else {
+          logDebug(`Unsubscribed from connectionId: ${connectionId}, remaining: ${callbacks.size}`);
         }
       }
     };

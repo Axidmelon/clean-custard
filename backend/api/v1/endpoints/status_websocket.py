@@ -56,6 +56,7 @@ async def send_all_agent_status(websocket: WebSocket):
     """Send current status of all agents to a specific WebSocket connection."""
     try:
         connected_agents = manager.get_connected_agents()
+        logger.info(f"Sending initial status for {len(connected_agents)} agents: {connected_agents}")
         
         # Send status for each agent
         for agent_id in connected_agents:
@@ -65,8 +66,9 @@ async def send_all_agent_status(websocket: WebSocket):
                 "agentConnected": True
             }
             await websocket.send_text(json.dumps(message))
+            logger.debug(f"Sent initial status for agent {agent_id}: connected")
             
-        logger.debug(f"Sent initial status for {len(connected_agents)} agents")
+        logger.info(f"Successfully sent initial status for {len(connected_agents)} agents")
         
     except Exception as e:
         logger.error(f"Error sending initial agent status: {e}")
@@ -87,12 +89,15 @@ async def broadcast_agent_status_update(agent_id: str, agent_connected: bool):
     
     message_text = json.dumps(message)
     disconnected_connections = set()
+    successful_sends = 0
     
     for websocket in status_connections.copy():
         try:
             await websocket.send_text(message_text)
+            successful_sends += 1
             logger.debug(f"Sent status update to WebSocket client: {agent_id} -> {agent_connected}")
         except WebSocketDisconnect:
+            logger.debug(f"WebSocket client disconnected during broadcast")
             disconnected_connections.add(websocket)
         except Exception as e:
             logger.error(f"Error sending status update to WebSocket: {e}")
@@ -102,7 +107,7 @@ async def broadcast_agent_status_update(agent_id: str, agent_connected: bool):
     for websocket in disconnected_connections:
         status_connections.discard(websocket)
     
-    logger.info(f"Successfully broadcasted agent status update for {agent_id}: {agent_connected} to {len(status_connections)} clients")
+    logger.info(f"Successfully broadcasted agent status update for {agent_id}: {agent_connected} to {successful_sends} clients (cleaned up {len(disconnected_connections)} disconnected)")
 
 # Register handlers with the connection manager
 def register_status_handlers():

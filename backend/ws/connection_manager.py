@@ -57,6 +57,9 @@ class ConnectionManager:
         
         # Emit agent connected event
         await self.handle_message(agent_id, {"type": "AGENT_CONNECTED"})
+        
+        # Also directly trigger status broadcast to ensure frontend gets updated
+        await self._broadcast_agent_status_update(agent_id, True)
 
     def disconnect(self, agent_id: str) -> None:
         """
@@ -75,6 +78,9 @@ class ConnectionManager:
             # Emit agent disconnected event
             import asyncio
             asyncio.create_task(self.handle_message(agent_id, {"type": "AGENT_DISCONNECTED"}))
+            
+            # Also directly trigger status broadcast to ensure frontend gets updated
+            asyncio.create_task(self._broadcast_agent_status_update(agent_id, False))
 
     async def send_json_to_agent(self, message: Dict[str, Any], agent_id: str) -> bool:
         """
@@ -546,6 +552,18 @@ class ConnectionManager:
                 metadata.get("message_count", 0) for metadata in self.connection_metadata.values()
             ),
         }
+
+    async def _broadcast_agent_status_update(self, agent_id: str, agent_connected: bool):
+        """
+        Broadcast agent status update to all connected status WebSocket clients.
+        This is a direct method to ensure status updates are sent immediately.
+        """
+        try:
+            # Import here to avoid circular imports
+            from api.v1.endpoints.status_websocket import broadcast_agent_status_update
+            await broadcast_agent_status_update(agent_id, agent_connected)
+        except Exception as e:
+            logger.error(f"Failed to broadcast agent status update for {agent_id}: {e}")
 
 
 # Create a singleton instance for the application
