@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
     enable_docs: bool = True
+    
+    # Production Security
+    cors_origins: str = ""
+    max_request_size: int = 16 * 1024 * 1024  # 16MB
+    request_timeout: int = 30
+    keep_alive_timeout: int = 5
 
     # WebSocket Configuration
     ws_heartbeat_interval: int = 30
@@ -103,6 +109,13 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v or []
+    
+    @field_validator("cors_origins")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v or []
 
     @field_validator("environment")
     @classmethod
@@ -118,7 +131,7 @@ class Settings(BaseSettings):
             raise ValueError("LOG_LEVEL must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL")
         return v.upper()
 
-    model_config = {"env_file": ".env", "case_sensitive": False}
+    model_config = {"env_file": ".env", "case_sensitive": False, "extra": "ignore"}
 
 
 def get_settings() -> Settings:
@@ -160,6 +173,9 @@ def validate_production_readiness() -> List[str]:
 
     if any("localhost" in origin for origin in settings.allowed_origins):
         errors.append("ALLOWED_ORIGINS should not include localhost in production")
+    
+    if not settings.cors_origins:
+        errors.append("CORS_ORIGINS should be configured for production")
 
     if settings.frontend_url.startswith("http://localhost"):
         errors.append("FRONTEND_URL should use HTTPS in production")

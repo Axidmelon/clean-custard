@@ -29,6 +29,7 @@ langchain-openai>=0.3.32
 
 # Utilities
 email-validator>=2.3.0
+psutil>=6.1.0
 
 # Caching and Redis (only redis is used)
 redis>=5.2.0

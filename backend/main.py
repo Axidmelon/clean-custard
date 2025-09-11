@@ -1,10 +1,15 @@
 # File: backend/main.py
 
 import logging
+import time
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from dotenv import load_dotenv
 
 # Import API routers
@@ -22,10 +27,34 @@ from core.config import settings, validate_production_readiness
 load_dotenv()
 
 # Set up logging
-logging.basicConfig(
-    level=getattr(logging, settings.log_level),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+def setup_logging():
+    """Configure logging for production and development."""
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    
+    if settings.environment == "production":
+        # Production logging configuration
+        logging.basicConfig(
+            level=getattr(logging, settings.log_level),
+            format=log_format,
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler("/app/logs/app.log", mode="a"),
+            ]
+        )
+        
+        # Reduce noise from third-party libraries
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+        logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+        logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+        logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+    else:
+        # Development logging configuration
+        logging.basicConfig(
+            level=getattr(logging, settings.log_level),
+            format=log_format,
+        )
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -135,7 +164,7 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
+    allow_origins=settings.allowed_origins if settings.allowed_origins else ["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=[
@@ -148,6 +177,63 @@ app.add_middleware(
         "Access-Control-Request-Headers",
     ],
 )
+
+# Production middleware
+if settings.environment == "production":
+    # Trusted host middleware for security
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["*"]  # Configure with your actual domains
+    )
+
+# Gzip compression middleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Request timing middleware
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    
+    # Security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    
+    # HSTS header for HTTPS (only in production)
+    if settings.environment == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    
+    # Content Security Policy
+    csp = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
+    response.headers["Content-Security-Policy"] = csp
+    
+    return response
+
+# Global OPTIONS handler for CORS preflight requests
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    """Handle all OPTIONS requests for CORS preflight"""
+    from fastapi.responses import Response
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
 
 # Include API routers
 app.include_router(auth.router, prefix="/api/v1", tags=["Authentication"])
@@ -186,35 +272,74 @@ def health_check():
     Returns:
         Detailed health status information
     """
+    import datetime
+    
+    health_data = {
+        "status": "healthy",
+        "version": "1.0.0",
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "environment": settings.environment,
+        "services": {},
+        "connections": {},
+        "uptime": "running",
+    }
+    
+    # Test database connectivity
     try:
-        # Test database connectivity
         from db.dependencies import get_db
         from sqlalchemy import text
-
+        import time
+        
+        start_time = time.time()
         db = next(get_db())
         db.execute(text("SELECT 1"))
         db.close()
-        db_status = "healthy"
+        db_response_time = time.time() - start_time
+        
+        health_data["services"]["database"] = {
+            "status": "healthy",
+            "response_time_ms": round(db_response_time * 1000, 2)
+        }
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
-        db_status = "unhealthy"
+        health_data["services"]["database"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health_data["status"] = "unhealthy"
 
-    connection_stats = manager.get_connection_stats()
-
-    # Determine overall health status
-    overall_status = "healthy" if db_status == "healthy" else "unhealthy"
-
-    return {
-        "status": overall_status,
-        "version": "1.0.0",
-        "timestamp": "2025-09-10T00:00:00Z",
-        "services": {"database": db_status, "websocket_manager": "healthy"},
-        "connections": {
+    # WebSocket manager check
+    try:
+        connection_stats = manager.get_connection_stats()
+        health_data["services"]["websocket_manager"] = {
+            "status": "healthy",
+            "total_connections": connection_stats["total_connections"],
+            "connected_agents": connection_stats["connected_agents"]
+        }
+        health_data["connections"] = {
             "total": connection_stats["total_connections"],
             "agents": connection_stats["connected_agents"],
-        },
-        "uptime": "running",
-    }
+        }
+    except Exception as e:
+        logger.error(f"WebSocket manager health check failed: {e}")
+        health_data["services"]["websocket_manager"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health_data["status"] = "unhealthy"
+
+    # External services check
+    if settings.openai_api_key and settings.openai_api_key != "your-openai-api-key-here":
+        health_data["services"]["openai"] = {"status": "configured"}
+    else:
+        health_data["services"]["openai"] = {"status": "not_configured"}
+
+    if settings.resend_api_key and settings.resend_api_key != "your-resend-api-key-here":
+        health_data["services"]["resend"] = {"status": "configured"}
+    else:
+        health_data["services"]["resend"] = {"status": "not_configured"}
+
+    return health_data
 
 
 @app.get("/status", tags=["Health Check"])
@@ -313,6 +438,51 @@ def readiness_check():
     )
 
 
+@app.get("/metrics", tags=["Monitoring"])
+def get_metrics():
+    """
+    Get application metrics for monitoring and observability.
+
+    Returns:
+        Application metrics and performance data
+    """
+    import datetime
+    import psutil
+    import os
+    
+    # Get system metrics
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    
+    # Get database connection pool stats
+    pool = engine.pool
+    pool_stats = {
+        "size": pool.size(),
+        "checked_in": pool.checkedin(),
+        "checked_out": pool.checkedout(),
+        "overflow": pool.overflow(),
+        "invalid": pool.invalid(),
+    }
+    
+    # Get WebSocket connection stats
+    ws_stats = manager.get_connection_stats()
+    
+    return {
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "environment": settings.environment,
+        "version": "1.0.0",
+        "system": {
+            "memory_usage_mb": round(memory_info.rss / 1024 / 1024, 2),
+            "memory_percent": round(process.memory_percent(), 2),
+            "cpu_percent": round(process.cpu_percent(), 2),
+            "threads": process.num_threads(),
+        },
+        "database_pool": pool_stats,
+        "websocket_connections": ws_stats,
+        "uptime_seconds": time.time() - process.create_time(),
+    }
+
+
 @app.get("/production-readiness", tags=["Health Check"])
 def check_production_readiness():
     """
@@ -409,6 +579,33 @@ def list_connected_agents():
 
 # --- Error Handlers ---
 
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions with custom response."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": "HTTP Error",
+            "message": exc.detail,
+            "status_code": exc.status_code,
+            "path": str(request.url.path),
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with custom response."""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "Validation Error",
+            "message": "Invalid request data",
+            "details": exc.errors(),
+            "path": str(request.url.path),
+        },
+    )
+
 
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
@@ -427,10 +624,26 @@ async def not_found_handler(request, exc):
 async def internal_error_handler(request, exc):
     """Handle 500 errors with custom response."""
     logger.error(f"Internal server error: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal Server Error", "message": "An unexpected error occurred"},
-    )
+    
+    # In production, don't expose internal error details
+    if settings.environment == "production":
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal Server Error", 
+                "message": "An unexpected error occurred",
+                "request_id": getattr(request.state, "request_id", None)
+            },
+        )
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal Server Error", 
+                "message": str(exc),
+                "request_id": getattr(request.state, "request_id", None)
+            },
+        )
 
 
 # --- Application Startup ---

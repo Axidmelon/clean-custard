@@ -40,19 +40,46 @@ router = APIRouter()
 @router.options("/auth/signup")
 def signup_options():
     """Handle preflight OPTIONS request for signup endpoint"""
-    return {"message": "OK"}
+    from fastapi.responses import Response
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin, X-Requested-With",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
 
 
 @router.options("/auth/login")
 def login_options():
     """Handle preflight OPTIONS request for login endpoint"""
-    return {"message": "OK"}
+    from fastapi.responses import Response
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin, X-Requested-With",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
 
 
 @router.options("/auth/reset-password")
 def reset_password_options():
     """Handle preflight OPTIONS request for reset-password endpoint"""
-    return {"message": "OK"}
+    from fastapi.responses import Response
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin, X-Requested-With",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
 
 
 @router.post("/auth/signup", response_model=UserSchema)

@@ -19,12 +19,20 @@ if not SQLALCHEMY_DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 
 # Database connection pool settings
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "20"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "30"))
 DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
 DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))
+DB_POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
 
 # Create engine with connection pooling
+connect_args = {}
+if "postgresql" in SQLALCHEMY_DATABASE_URL:
+    connect_args.update({
+        "sslmode": "require",
+        "options": "-c default_transaction_isolation=read_committed"
+    })
+
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     poolclass=QueuePool,
@@ -32,8 +40,12 @@ engine = create_engine(
     max_overflow=DB_MAX_OVERFLOW,
     pool_timeout=DB_POOL_TIMEOUT,
     pool_recycle=DB_POOL_RECYCLE,
-    pool_pre_ping=True,  # Verify connections before use
+    pool_pre_ping=DB_POOL_PRE_PING,  # Verify connections before use
     echo=os.getenv("DEBUG", "false").lower() == "true",
+    connect_args=connect_args,
+    # Production optimizations
+    pool_reset_on_return="commit",
+    isolation_level="READ_COMMITTED",
 )
 
 # A SessionLocal class is a factory for creating new database sessions.
