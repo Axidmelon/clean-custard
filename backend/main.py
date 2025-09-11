@@ -447,14 +447,28 @@ def get_metrics():
         Application metrics and performance data
     """
     import datetime
-    import psutil
     import os
     
-    # Get system metrics
-    process = psutil.Process(os.getpid())
-    memory_info = process.memory_info()
+    # Get system metrics (with fallback if psutil not available)
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        memory_info = process.memory_info()
+        memory_usage_mb = round(memory_info.rss / 1024 / 1024, 2)
+        memory_percent = round(process.memory_percent(), 2)
+        cpu_percent = round(process.cpu_percent(), 2)
+        threads = process.num_threads()
+        uptime_seconds = time.time() - process.create_time()
+    except ImportError:
+        # Fallback if psutil is not available
+        memory_usage_mb = 0
+        memory_percent = 0
+        cpu_percent = 0
+        threads = 0
+        uptime_seconds = 0
     
     # Get database connection pool stats
+    from db.database import engine
     pool = engine.pool
     pool_stats = {
         "size": pool.size(),
@@ -472,14 +486,14 @@ def get_metrics():
         "environment": settings.environment,
         "version": "1.0.0",
         "system": {
-            "memory_usage_mb": round(memory_info.rss / 1024 / 1024, 2),
-            "memory_percent": round(process.memory_percent(), 2),
-            "cpu_percent": round(process.cpu_percent(), 2),
-            "threads": process.num_threads(),
+            "memory_usage_mb": memory_usage_mb,
+            "memory_percent": memory_percent,
+            "cpu_percent": cpu_percent,
+            "threads": threads,
         },
         "database_pool": pool_stats,
         "websocket_connections": ws_stats,
-        "uptime_seconds": time.time() - process.create_time(),
+        "uptime_seconds": uptime_seconds,
     }
 
 

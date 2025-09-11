@@ -168,14 +168,13 @@ def validate_production_readiness() -> List[str]:
     if settings.enable_docs:
         errors.append("ENABLE_DOCS should be 'false' in production")
 
-    if not settings.allowed_origins:
-        errors.append("ALLOWED_ORIGINS must be configured for production")
+    # Check CORS configuration (use cors_origins if available, otherwise allowed_origins)
+    cors_origins = settings.cors_origins if settings.cors_origins else settings.allowed_origins
+    if not cors_origins:
+        errors.append("CORS_ORIGINS or ALLOWED_ORIGINS must be configured for production")
 
-    if any("localhost" in origin for origin in settings.allowed_origins):
-        errors.append("ALLOWED_ORIGINS should not include localhost in production")
-    
-    if not settings.cors_origins:
-        errors.append("CORS_ORIGINS should be configured for production")
+    if any("localhost" in origin for origin in cors_origins):
+        errors.append("CORS origins should not include localhost in production")
 
     if settings.frontend_url.startswith("http://localhost"):
         errors.append("FRONTEND_URL should use HTTPS in production")

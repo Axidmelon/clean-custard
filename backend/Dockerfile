@@ -54,4 +54,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 # Start command with production optimizations
 # Railway will use the PORT environment variable
-CMD ["sh", "-c", "gunicorn main:app --bind 0.0.0.0:${PORT:-8000} --workers 4 --worker-class uvicorn.workers.UvicornWorker --access-log --log-level info --timeout-keep-alive 5 --limit-max-requests 1000 --limit-concurrency 1000"]
+CMD ["sh", "-c", "gunicorn main:app --bind 0.0.0.0:${PORT:-8000} --workers 4 --worker-class uvicorn.workers.UvicornWorker --access-logfile - --log-level info --timeout-keep-alive 5 --limit-max-requests 1000 --limit-concurrency 1000"]
