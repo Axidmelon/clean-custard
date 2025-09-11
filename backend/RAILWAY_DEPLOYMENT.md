@@ -9,13 +9,21 @@ This guide covers deploying the Custard Backend to Railway with SSL and monitori
 Railway will handle SSL automatically, so we can simplify the setup:
 
 ```bash
-# Remove nginx from docker-compose for Railway deployment
 # Railway handles reverse proxy and SSL automatically
+# Updated requirements.txt includes all necessary dependencies
+# Single Dockerfile for production deployment
+# Uses docker-compose.railway.yml for Railway-specific configuration
 ```
+
+### **📋 Pre-Deployment Checklist**
+
+- ✅ **requirements.txt** - Updated with all dependencies including gunicorn
+- ✅ **Dockerfile** - Single production Dockerfile optimized for Railway
+- ✅ **docker-compose.railway.yml** - Railway-specific compose configuration
 
 ### **2. Railway-Specific Docker Compose**
 
-Create a Railway-optimized version:
+Use the existing Railway-optimized version:
 
 ```yaml
 # docker-compose.railway.yml
@@ -85,32 +93,38 @@ volumes:
 Set these in Railway dashboard:
 
 ```env
-# Database (Railway will provide this)
+# Database (Railway will provide this automatically)
 DATABASE_URL=postgresql://postgres:password@host:port/database
 
-# Security
-SECRET_KEY=your-super-secure-secret-key
+# Security (REQUIRED)
+SECRET_KEY=your-super-secure-secret-key-32-chars-min
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# API Configuration
+# API Configuration (REQUIRED)
 ENVIRONMENT=production
 DEBUG=false
 ENABLE_DOCS=false
 LOG_LEVEL=INFO
 
-# CORS (update with your actual domains)
+# CORS (REQUIRED - update with your actual domains)
 ALLOWED_ORIGINS=https://your-frontend.railway.app,https://yourdomain.com
 FRONTEND_URL=https://your-frontend.railway.app
 BACKEND_URL=https://your-backend.railway.app
 
-# External Services
+# External Services (REQUIRED for full functionality)
 OPENAI_API_KEY=sk-your-openai-api-key
 RESEND_API_KEY=re_your-resend-api-key
 FROM_EMAIL=noreply@yourdomain.com
 
-# Monitoring (optional)
+# Redis (Railway will provide this automatically)
+REDIS_URL=redis://redis:6379
+
+# Monitoring (optional but recommended)
 SENTRY_DSN=https://your-sentry-dsn
+
+# Railway-specific (automatically set by Railway)
+PORT=8000
 ```
 
 ## 🔧 **Railway Deployment Steps**
@@ -134,7 +148,9 @@ cd backend
 railway up
 
 # Railway will automatically:
-# - Build your Docker image
+# - Build Docker image using Dockerfile
+# - Install dependencies from requirements.txt
+# - Use docker-compose.railway.yml configuration
 # - Provide SSL certificate
 # - Set up custom domain
 # - Handle scaling
@@ -206,6 +222,34 @@ Railway handles:
 3. **Automatic rollbacks** on failure
 4. **SSL certificate renewal** (automatic)
 5. **Custom domain setup** (automatic)
+
+## 📦 **Updated Dependencies for Railway**
+
+The `requirements.txt` has been optimized for Railway deployment:
+
+### **Core Production Dependencies**
+- **FastAPI** - Web framework with automatic OpenAPI docs
+- **Uvicorn** - ASGI server with WebSocket support
+- **Gunicorn** - Production WSGI server with worker processes
+- **SQLAlchemy** - Database ORM with connection pooling
+- **Alembic** - Database migrations
+- **psycopg2-binary** - PostgreSQL adapter
+
+### **Security & Authentication**
+- **python-jose[cryptography]** - JWT token handling
+- **passlib[bcrypt]** - Password hashing
+- **bcrypt** - Secure password hashing
+- **cryptography** - Cryptographic operations
+
+### **External Services**
+- **OpenAI** - AI/LLM integration
+- **Resend** - Email service
+- **Redis** - Caching and rate limiting
+
+### **Production Monitoring**
+- **psutil** - System resource monitoring
+- **structlog** - Structured logging
+- **httpx** - Modern HTTP client
 
 ## 💡 **Railway Best Practices**
 

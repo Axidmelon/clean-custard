@@ -45,6 +45,17 @@ def create_connection(
         # For now, assume one organization for simplicity
         # TODO: In a real multi-tenant app, get the org_id from the logged-in user
         org_id = "9a4857ae-5f33-4e4d-8fea-663b05bfc35b"
+        
+        # Ensure the organization exists, create if it doesn't
+        from db.models import Organization
+        import uuid
+        existing_org = db.query(Organization).filter(Organization.id == uuid.UUID(org_id)).first()
+        if not existing_org:
+            logger.info(f"Creating default organization with ID: {org_id}")
+            default_org = Organization(id=uuid.UUID(org_id), name="Default Organization")
+            db.add(default_org)
+            db.commit()
+            logger.info("Default organization created successfully")
 
         # Generate API key for the agent
         plain_api_key, hashed_api_key = APIKeyService.generate_api_key()

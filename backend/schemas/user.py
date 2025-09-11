@@ -11,7 +11,7 @@ class UserCreate(BaseModel):
     password: str
     first_name: str = ""
     last_name: str = ""
-    organization_id: uuid.UUID
+    organization_id: Optional[uuid.UUID] = None
 
 
 # --- Schema for user login (INPUT) ---

@@ -7,7 +7,7 @@ from db.dependencies import get_db
 from schemas.user import UserCreate, User as UserSchema
 from services import user_services as user_service
 from core.email_service import send_verification_email, send_password_reset_email
-from core.jwt_handler import create_access_token, verify_token
+from core.jwt_handler import create_access_token, get_current_user
 from core.rate_limiter import check_rate_limit
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -224,7 +224,7 @@ def reset_password(request: PasswordResetRequest, db: Session = Depends(get_db))
 def update_user_profile(
     profile_data: ProfileUpdateRequest,
     db: Session = Depends(get_db),
-    current_user: UserSchema = Depends(verify_token),
+    current_user: UserSchema = Depends(get_current_user()),
 ):
     """
     Update user profile information.

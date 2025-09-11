@@ -70,6 +70,65 @@ def verify_token(token: str, token_type: str = "access"):
         return None
 
 
+def get_current_user():
+    """
+    FastAPI dependency to get the current authenticated user.
+    
+    Returns:
+        User data from token payload
+        
+    Raises:
+        HTTPException: If token is invalid or user not found
+    """
+    from fastapi import HTTPException, Depends
+    from fastapi.security import HTTPBearer
+    from services import user_services as user_service
+    from db.dependencies import get_db
+    
+    # Create OAuth2 scheme
+    oauth2_scheme = HTTPBearer()
+    
+    def _get_current_user(credentials = Depends(oauth2_scheme)):
+        try:
+            # Extract token from credentials
+            token = credentials.credentials
+            
+            # Verify the token
+            payload = verify_token(token, "access")
+            if not payload:
+                raise HTTPException(status_code=401, detail="Invalid token")
+            
+            # Get user ID from token
+            user_id = payload.get("sub")
+            if not user_id:
+                raise HTTPException(status_code=401, detail="Invalid token payload")
+            
+            # Get database session
+            db_gen = get_db()
+            db = next(db_gen)
+            
+            try:
+                # Get user from database
+                user = user_service.get_user_by_id(db, user_id)
+                if not user:
+                    raise HTTPException(status_code=404, detail="User not found")
+                
+                return user
+                
+            finally:
+                db.close()
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"Token validation error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=401, detail="Token validation failed")
+    
+    return _get_current_user
+
+
 def generate_secure_secret():
     """
     Generate a secure random secret key for JWT signing.
