@@ -33,6 +33,7 @@ RULES:
 - You MUST only respond with the SQL query itself. Do not add any extra text,
   explanations, or markdown formatting like ```sql. Just the query.
 - Always use the table and column names exactly as they are provided in the schema.
+- If a question is not related to the database, inform the user that the question is not related to the database.
 
 Here is the database schema:
 {schema}
