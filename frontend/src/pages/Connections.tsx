@@ -1,4 +1,4 @@
-import { Database, Layers, GitBranch, CheckCircle, Snowflake, Loader2, AlertCircle, X } from "lucide-react";
+import { Database, Layers, GitBranch, CheckCircle, Snowflake, Loader2, AlertCircle, X, Server, Cloud } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -702,6 +702,38 @@ function SimpleConnectionCard({ connection, onDelete }: {
   );
 }
 
+// Toggle Button Component
+function HostingToggle() {
+  const [isSelfHost, setIsSelfHost] = useState(false);
+
+  return (
+    <div className="flex items-center bg-gray-100 rounded-lg p-1">
+      <button
+        onClick={() => setIsSelfHost(false)}
+        className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+          !isSelfHost 
+            ? 'bg-white text-blue-600 shadow-sm' 
+            : 'text-gray-600 hover:text-gray-800'
+        }`}
+      >
+        <Cloud className="w-4 h-4" />
+        Host Agent with Custard
+      </button>
+      <button
+        onClick={() => setIsSelfHost(true)}
+        className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+          isSelfHost 
+            ? 'bg-white text-blue-600 shadow-sm' 
+            : 'text-gray-600 hover:text-gray-800'
+        }`}
+      >
+        <Server className="w-4 h-4" />
+        Self Host
+      </button>
+    </div>
+  );
+}
+
 // Bottom Bar Component for Connection Form
 function ConnectionBottomBar({ 
   databaseTemplate, 
@@ -735,6 +767,16 @@ function ConnectionBottomBar({
         }}
       />
       
+      {/* Close Button - Top Right of Page */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onClose}
+        className="fixed top-4 right-4 z-50 text-gray-400 hover:text-gray-600 bg-white/90 hover:bg-white shadow-lg"
+      >
+        <X className="w-5 h-5" />
+      </Button>
+      
       {/* Bottom Bar */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50 rounded-t-2xl">
         <div className="max-w-7xl mx-auto p-6">
@@ -753,20 +795,13 @@ function ConnectionBottomBar({
                   </p>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onClose}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </Button>
+              <HostingToggle />
             </div>
           )}
           
           {currentStep === 2 && (
-            <div className="relative flex items-center justify-center mb-4">
-              <div className="text-center">
+            <div className="flex items-center justify-between mb-4">
+              <div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">
                   Run the Secure Connector Agent
                 </h3>
@@ -774,14 +809,7 @@ function ConnectionBottomBar({
                   Set up a secure connection to your database using our lightweight agent.
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onClose}
-                className="absolute right-0 text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </Button>
+              <HostingToggle />
             </div>
           )}
           
