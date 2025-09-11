@@ -1,11 +1,11 @@
-# Custard Agent Docker Setup
+# Agent PostgreSQL Docker Setup
 
 This directory contains the Docker configuration for the Custard Agent service.
 
 ## Overview
 
-The Custard Agent is a Python-based service that:
-- Connects to the Custard backend via WebSocket
+The Agent PostgreSQL is a Python-based service that:
+- Connects to the backend via WebSocket
 - Executes read-only SQL queries on customer databases
 - Discovers database schemas
 - Provides secure, sandboxed database access
@@ -53,10 +53,10 @@ docker-compose -f docker-compose-agent.yml up -d --build
 
 ```bash
 # Build the image
-docker build -t custard-agent .
+docker build -t agent-postgresql .
 
 # Run the container
-docker run --env-file .env custard-agent
+docker run --env-file .env agent-postgresql
 ```
 
 ### 3. Testing
@@ -71,8 +71,8 @@ The agent will automatically:
 
 ```
 ┌─────────────────┐    WebSocket    ┌─────────────────┐    SQL    ┌─────────────────┐
-│   Custard       │◄──────────────►│   Custard       │◄─────────►│   Customer      │
-│   Backend       │                │   Agent         │           │   Database      │
+│   Backend       │◄──────────────►│   Agent         │◄─────────►│   Customer      │
+│   (FastAPI)     │                │   PostgreSQL    │           │   Database      │
 │   (FastAPI)     │                │   (Docker)      │           │   (PostgreSQL)  │
 └─────────────────┘                └─────────────────┘           └─────────────────┘
 ```
@@ -140,10 +140,10 @@ python schema_discoverer.py
 
 ```bash
 # View container logs
-docker logs custard-agent
+docker logs agent-postgresql
 
 # Follow logs in real-time
-docker logs -f custard-agent
+docker logs -f agent-postgresql
 ```
 
 ### Health Check
@@ -152,7 +152,7 @@ The container includes a health check that verifies WebSocket connectivity:
 
 ```bash
 # Check container health
-docker inspect custard-agent --format='{{.State.Health.Status}}'
+docker inspect agent-postgresql --format='{{.State.Health.Status}}'
 ```
 
 ## Production Deployment

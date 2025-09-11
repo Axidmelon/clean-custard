@@ -107,7 +107,7 @@ Clean Custard uses a microservices architecture with three main components:
 
 4. **Agent Setup** (for testing)
    ```bash
-   cd agent
+   cd agent-postgresql
    python -m venv venv
    source venv/bin/activate
    pip install -r requirements.txt
@@ -139,7 +139,7 @@ The agent runs as a Docker container in your network and connects to Clean Custa
 
 ```bash
 docker run -d \
-  --name custard-agent-your-db \
+  --name agent-postgresql-your-db \
   -e CONNECTION_ID="your-connection-id" \
   -e AGENT_ID="your-agent-id" \
   -e BACKEND_WEBSOCKET_URI="wss://your-backend.railway.app/api/v1/connections/ws/your-agent-id" \
@@ -194,7 +194,7 @@ clean-custard/
 │   ├── llm/                # LLM integration services
 │   ├── services/           # Business logic services
 │   └── main.py
-├── agent/                  # Database connector agents
+├── agent-postgresql/       # Database connector agents
 │   ├── main.py            # Agent main entry point
 │   ├── schema_discoverer.py # Database schema discovery
 │   └── requirements.txt

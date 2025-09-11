@@ -1,15 +1,15 @@
-# Custard Agent Deployment Guide
+# Agent PostgreSQL Deployment Guide
 
 ## Overview
 
-This guide provides complete instructions for deploying the Custard Agent in your environment. The generated Docker command is just the first step - additional configuration is required for successful deployment.
+This guide provides complete instructions for deploying the Agent PostgreSQL in your environment. The generated Docker command is just the first step - additional configuration is required for successful deployment.
 
 ## Prerequisites
 
-Before running the Custard Agent, ensure you have:
+Before running the Agent PostgreSQL, ensure you have:
 
 - [ ] Docker installed and running
-- [ ] Network access to the Custard backend
+- [ ] Network access to the backend
 - [ ] Database credentials and connectivity
 - [ ] Proper firewall configuration
 - [ ] Required environment variables
@@ -126,7 +126,7 @@ Replace the placeholder values in the Docker command:
 ```bash
 # Example with real values
 docker run -d \
-  --name custard-agent-production-db \
+  --name agent-postgresql-production-db \
   -e CONNECTION_ID="agent-production-db-1234567890" \
   -e BACKEND_WEBSOCKET_URI="ws://your-backend.railway.app/api/v1/connections/ws/agent-production-db-1234567890" \
   -e DB_HOST="db.example.com" \
@@ -144,7 +144,7 @@ Execute the configured Docker command:
 ```bash
 # Run the agent
 docker run -d \
-  --name custard-agent-production-db \
+  --name agent-postgresql-production-db \
   -e CONNECTION_ID="agent-production-db-1234567890" \
   -e BACKEND_WEBSOCKET_URI="ws://your-backend.railway.app/api/v1/connections/ws/agent-production-db-1234567890" \
   -e DB_HOST="db.example.com" \
@@ -161,13 +161,13 @@ docker run -d \
 
 ```bash
 # Check if container is running
-docker ps | grep custard-agent
+docker ps | grep agent-postgresql
 
 # Check agent logs
-docker logs custard-agent-production-db
+docker logs agent-postgresql-production-db
 
 # Follow logs in real-time
-docker logs -f custard-agent-production-db
+docker logs -f agent-postgresql-production-db
 ```
 
 #### 7.2 Expected Log Output
@@ -290,13 +290,13 @@ docker network inspect bridge
 
 ```bash
 # Check container health
-docker inspect custard-agent-production-db --format='{{.State.Health.Status}}'
+docker inspect agent-postgresql-production-db --format='{{.State.Health.Status}}'
 
 # Check resource usage
-docker stats custard-agent-production-db
+docker stats agent-postgresql-production-db
 
 # Check logs for errors
-docker logs custard-agent-production-db | grep ERROR
+docker logs agent-postgresql-production-db | grep ERROR
 ```
 
 ### 2. Updates
@@ -306,8 +306,8 @@ docker logs custard-agent-production-db | grep ERROR
 docker pull custard/agent:latest
 
 # Stop and remove old container
-docker stop custard-agent-production-db
-docker rm custard-agent-production-db
+docker stop agent-postgresql-production-db
+docker rm agent-postgresql-production-db
 
 # Run new container with same configuration
 # (Use your saved Docker command)
@@ -334,19 +334,19 @@ If you encounter issues not covered in this guide:
 
 ```bash
 # Run agent
-docker run -d --name custard-agent-[name] -e [env-vars] custard/agent:latest
+docker run -d --name agent-postgresql-[name] -e [env-vars] custard/agent:latest
 
 # Check status
-docker ps | grep custard-agent
+docker ps | grep agent-postgresql
 
 # View logs
-docker logs custard-agent-[name]
+docker logs agent-postgresql-[name]
 
 # Stop agent
-docker stop custard-agent-[name]
+docker stop agent-postgresql-[name]
 
 # Remove agent
-docker rm custard-agent-[name]
+docker rm agent-postgresql-[name]
 ```
 
 ### Required Environment Variables

@@ -35,7 +35,7 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
     "sslmode": os.getenv("DB_SSLMODE", "require"),  # Use 'require' for Supabase
     "connect_timeout": 10,  # Connection timeout
-    "application_name": "custard-agent",  # Application name for connection identification
+    "application_name": "agent-postgresql",  # Application name for connection identification
     "gssencmode": "disable",  # Disable GSS encryption mode
     "options": "-c default_transaction_isolation=read committed",  # Set transaction isolation
 }
@@ -354,7 +354,7 @@ async def handle_ping(
 # --- Main Agent Logic ---
 
 
-class CustardAgent:
+class AgentPostgreSQL:
     """
     Main agent class that handles WebSocket communication with the backend.
     """
@@ -465,7 +465,7 @@ class CustardAgent:
 
 async def main():
     """Main entry point."""
-    agent = CustardAgent()
+    agent = AgentPostgreSQL()
 
     try:
         await agent.run()

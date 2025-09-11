@@ -234,7 +234,7 @@ function ConnectionForm({ databaseTemplate, onStepChange }: {
     logDebug('WebSocket URL being used:', websocketUrl);
     
     const command = `docker run -d \\
-  --name custard-agent-${connectionName.toLowerCase().replace(/\s+/g, '-')} \\
+  --name agent-postgresql-${connectionName.toLowerCase().replace(/\s+/g, '-')} \\
   --network host \\
   -e CONNECTION_ID="${connectionId}" \\
   -e AGENT_ID="${agentId}" \\
@@ -357,7 +357,7 @@ function ConnectionForm({ databaseTemplate, onStepChange }: {
             <div className="p-4">
               <pre className="whitespace-pre-wrap text-xs leading-relaxed font-mono overflow-x-auto">
 {`docker run -d \\
-  --name custard-agent-${connectionName.toLowerCase().replace(/\s+/g, '-')} \\
+  --name agent-postgresql-${connectionName.toLowerCase().replace(/\s+/g, '-')} \\
   --network host \\
   -e CONNECTION_ID="${generatedConnectionId || 'YOUR_CONNECTION_UUID_HERE'}" \\
   -e AGENT_ID="${generatedAgentId || `agent-${connectionName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`}" \\

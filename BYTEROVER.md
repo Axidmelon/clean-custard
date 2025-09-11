@@ -9,14 +9,14 @@
 **Tech Stack**: 
 - Backend: FastAPI, SQLAlchemy, Alembic, WebSockets, LangChain, OpenAI GPT-4, JWT, Python 3.11+
 - Frontend: React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS, React Router, React Query, React Hook Form
-- Agent: Python, psycopg2, WebSockets, Docker
+- Agent PostgreSQL: Python, psycopg2, WebSockets, Docker
 - Database: PostgreSQL, SQLite
 - Deployment: Docker, Docker Compose, Container orchestration
 
 **Architecture**: Microservices Architecture with three main components:
 1. **Frontend** (React/TS on Vercel) - Modern web interface with real-time UI
 2. **Backend** (FastAPI on Render) - REST API, WebSocket server, LLM integration, connection management
-3. **Agent** (Docker Container) - WebSocket client, database connection, schema discovery, query execution
+3. **Agent PostgreSQL** (Docker Container) - WebSocket client, database connection, schema discovery, query execution
 
 **Key Technical Decisions**:
 - WebSocket-based real-time communication between backend and agents
@@ -29,7 +29,7 @@
 **Entry Points**: 
 - Backend: `/Users/axid/custard/backend/main.py` (FastAPI app)
 - Frontend: `/Users/axid/custard/frontend/src/main.tsx` (React app)
-- Agent: `/Users/axid/custard/agent/main.py` (Agent service)
+- Agent PostgreSQL: `/Users/axid/custard/agent-postgresql/main.py` (Agent service)
 
 ---
 
@@ -90,7 +90,7 @@
 - **Agent Environment** (`.env`): `BACKEND_WEBSOCKET_URI`, `CONNECTION_ID`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
 - **Vite Config** (`/frontend/vite.config.ts`): Proxy configuration for API calls
 - **Database Config** (`/backend/alembic.ini`): Migration configuration
-- **Docker Compose** (`/agent/docker-compose-agent.yml`): Agent container orchestration with PostgreSQL
+- **Docker Compose** (`/agent-postgresql/docker-compose-agent.yml`): Agent container orchestration with PostgreSQL
 - **Docker Compose** (`/backend/docker-compose-backend.yml`): Backend container orchestration
 - **Dockerfiles**: Agent and Backend container definitions
 

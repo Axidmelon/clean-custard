@@ -54,7 +54,7 @@ export const APP_CONFIG = {
   
   // Docker configuration
   DOCKER: {
-    IMAGE_NAME: "custardagent/custard-agent:latest",
+    IMAGE_NAME: "custardagent/agent-postgresql:latest",
     BACKEND_URL: "wss://clean-custard-backend-production.up.railway.app",
   },
 } as const;

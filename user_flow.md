@@ -44,7 +44,7 @@ Once the user enters a name and clicks the button, the modal transitions to the 
 
     ```bash
     docker run -d \
-      --name custard-agent-prod \
+      --name agent-postgresql-prod \
       -e CUSTARD_API_KEY="agent_key_abc123_is_prefilled_here" \
       -e CUSTOMER_DB_HOST="YOUR_SUPABASE_HOST" \
       -e CUSTOMER_DB_PORT="6543" \

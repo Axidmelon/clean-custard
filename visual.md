@@ -76,7 +76,7 @@ User Question → Frontend → Backend API → LLM Service → Agent → Databas
 - **LLM Integration**: OpenAI API for SQL generation
 - **Database**: SQLite for connection management
 
-### Agent (Docker Container)
+### Agent PostgreSQL (Docker Container)
 - **WebSocket Client**: Connects to backend
 - **Database Access**: Direct connection to customer's database
 - **Security Sandbox**: Read-only query execution
@@ -97,7 +97,7 @@ User Question → Frontend → Backend API → LLM Service → Agent → Databas
 
 - **Read-Only Access**: Agent can only execute SELECT queries
 - **Secure WebSocket**: Encrypted communication between backend and agent
-- **Sandboxed Execution**: Agent runs in isolated Docker container
+- **Sandboxed Execution**: Agent PostgreSQL runs in isolated Docker container
 - **HTTPS**: All web traffic encrypted
 - **Query Validation**: SQL queries are validated before execution
 - **Connection Management**: Secure connection ID-based authentication

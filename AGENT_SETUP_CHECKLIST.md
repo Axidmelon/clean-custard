@@ -73,12 +73,12 @@ docker run --rm mongo:7.0 mongosh --host your-db-host.com --port 27017
 
 ### 1. Check Container Status
 ```bash
-docker ps | grep custard-agent
+docker ps | grep agent-postgresql
 ```
 
 ### 2. Monitor Logs
 ```bash
-docker logs custard-agent-[name]
+docker logs agent-postgresql-[name]
 ```
 
 ### 3. Expected Success Logs
