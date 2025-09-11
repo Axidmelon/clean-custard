@@ -60,40 +60,43 @@ export function useConnectionStatus(connectionId: string) {
     staleTime: APP_CONFIG.CACHE_TIMES.CONNECTIONS,
   });
   
-  // WebSocket status hook - use agent_id if available, otherwise fall back to connectionId
-  const agentId = connection?.agent_id || connectionId;
+  // WebSocket status hook - only use agent_id if available, don't fall back to connectionId
+  const agentId = connection?.agent_id;
   logDebug(`useConnectionStatus: connectionId=${connectionId}, agentId=${agentId}, connection=${connection?.name}`);
-  const { agentConnected: wsAgentConnected, isWebSocketConnected, reconnect } = useWebSocketStatus(agentId);
+  const { agentConnected: wsAgentConnected, isWebSocketConnected, reconnect } = useWebSocketStatus(agentId || '');
   
-  // Polling fallback query
+  // Polling fallback query - use when no agent_id or WebSocket fails
   const pollingQuery = useQuery({
     queryKey: QUERY_KEYS.connectionStatus(connectionId),
     queryFn: () => connectionService.getConnectionStatus(connectionId),
-    enabled: !!connectionId && !useWebSocket,
+    enabled: !!connectionId && (!agentId || !useWebSocket),
     staleTime: 2 * 60 * 1000, // 2 minutes when using polling
     refetchInterval: 2 * 60 * 1000, // Poll every 2 minutes as fallback
   });
 
-  // Switch to polling if WebSocket fails
+  // Switch to polling if WebSocket fails or no agent_id
   useEffect(() => {
-    if (!isWebSocketConnected && useWebSocket) {
+    if (!agentId) {
+      logDebug('No agent_id found, using polling fallback');
+      setUseWebSocket(false);
+    } else if (!isWebSocketConnected && useWebSocket) {
       logDebug('WebSocket disconnected, switching to polling fallback');
       setUseWebSocket(false);
     }
-  }, [isWebSocketConnected, useWebSocket]);
+  }, [agentId, isWebSocketConnected, useWebSocket]);
 
-  // Switch back to WebSocket if it reconnects
+  // Switch back to WebSocket if it reconnects and we have an agent_id
   useEffect(() => {
-    if (isWebSocketConnected && !useWebSocket) {
+    if (agentId && isWebSocketConnected && !useWebSocket) {
       logDebug('WebSocket reconnected, switching back to real-time updates');
       setUseWebSocket(true);
     }
-  }, [isWebSocketConnected, useWebSocket]);
+  }, [agentId, isWebSocketConnected, useWebSocket]);
 
   // Determine the current status
-  const agentConnected = useWebSocket ? wsAgentConnected : pollingQuery.data?.agent_connected;
-  const isLoading = useWebSocket ? wsAgentConnected === null : pollingQuery.isLoading;
-  const error = useWebSocket ? null : pollingQuery.error;
+  const agentConnected = useWebSocket && agentId ? wsAgentConnected : pollingQuery.data?.agent_connected;
+  const isLoading = useWebSocket && agentId ? wsAgentConnected === null : pollingQuery.isLoading;
+  const error = useWebSocket && agentId ? null : pollingQuery.error;
 
   return {
     data: {
