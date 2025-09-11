@@ -177,10 +177,13 @@ class ConnectionManager:
             await self.handle_agent_connected(agent_id, message)
             # Don't return here - continue to call registered handlers too
 
-        # Check for response to a specific query - THIS IS CRITICAL FOR SCHEMA DISCOVERY
+        # Check for response to a specific query - THIS IS CRITICAL FOR QUERY RESPONSES
         if "query_id" in message:
             query_id = message["query_id"]
             logger.info(f"Processing response for query_id '{query_id}' from agent '{agent_id}'")
+            logger.info(f"Response message: {message}")
+            
+            # Handle the response
             self.handle_response(query_id, message)
             
             # Special handling for late schema discovery responses
@@ -492,17 +495,22 @@ class ConnectionManager:
         logger.info(f"Response status for query '{query_id}': {response_status}")
         
         if response_status == "success":
-            schema_data = data.get("schema")
-            if schema_data:
+            # Check for different types of successful responses
+            if "schema" in data:
+                schema_data = data.get("schema")
                 logger.info(f"Schema data received for query '{query_id}': type={type(schema_data)}, size={len(str(schema_data)) if schema_data else 0}")
+            elif "data" in data:
+                query_data = data.get("data")
+                logger.info(f"Query data received for query '{query_id}': type={type(query_data)}, rows={len(query_data) if isinstance(query_data, list) else 'N/A'}")
             else:
-                logger.warning(f"No schema data in successful response for query '{query_id}'")
+                logger.warning(f"No schema or data in successful response for query '{query_id}'")
         elif response_status == "error":
             error_msg = data.get("error", "Unknown error")
             logger.error(f"Error response for query '{query_id}': {error_msg}")
         
         # Store response data
         self.response_data[query_id] = data
+        logger.info(f"Stored response data for query '{query_id}'")
         
         # Notify waiting coroutines
         if query_id in self.response_events:
@@ -576,19 +584,25 @@ class ConnectionManager:
             return
 
         try:
-            while True:
-                # Receive message from agent
-                data = await websocket.receive_text()
-                message = json.loads(data)
-
-                # Handle the message
-                await self.handle_message(agent_id, message)
+            # Use a more efficient message handling approach
+            async for message in websocket.iter_text():
+                try:
+                    # Parse the message
+                    parsed_message = json.loads(message)
+                    
+                    # Handle the message asynchronously
+                    await self.handle_message(agent_id, parsed_message)
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON received from agent '{agent_id}': {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error processing message from agent '{agent_id}': {e}")
+                    continue
 
         except WebSocketDisconnect:
             logger.info(f"Agent '{agent_id}' disconnected")
             self.disconnect(agent_id)
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON received from agent '{agent_id}': {e}")
         except Exception as e:
             logger.error(f"Error listening to agent '{agent_id}': {e}")
             self.disconnect(agent_id)
@@ -665,6 +679,8 @@ class ConnectionManager:
 
         logger.info(f"Sending query to agent '{agent_id}': query_id={query_id}, type={query.get('type')}")
         logger.info(f"Query payload: {query}")
+        logger.info(f"Agent connection status: {self.is_agent_connected(agent_id)}")
+        logger.info(f"Currently connected agents: {list(self.active_connections.keys())}")
 
         # Send the query
         success = await self.send_json_to_agent(query, agent_id)
@@ -673,11 +689,13 @@ class ConnectionManager:
             return {"error": "Failed to send query to agent"}
 
         logger.info(f"Query sent successfully to agent '{agent_id}', waiting for response...")
+        logger.info(f"Setting up response tracking for query '{query_id}'")
 
         # Wait for response
         response = await self.wait_for_response(query_id, timeout)
         
         logger.info(f"Query '{query_id}' completed with status: {response.get('status', 'unknown')}")
+        logger.info(f"Response data: {response}")
         return response
 
     def get_connection_stats(self) -> Dict[str, Any]:

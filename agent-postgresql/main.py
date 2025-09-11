@@ -224,7 +224,7 @@ def discover_database_schema() -> Union[Dict[str, Any], str]:
 
 
 async def handle_sql_query(
-    websocket: websockets.WebSocketServerProtocol, command: Dict[str, Any]
+    websocket: websockets.WebSocketClientProtocol, command: Dict[str, Any]
 ) -> None:
     """
     Handle a SQL query request from the backend.
@@ -272,7 +272,7 @@ async def handle_sql_query(
 
 
 async def handle_schema_discovery(
-    websocket: websockets.WebSocketServerProtocol, command: Dict[str, Any]
+    websocket: websockets.WebSocketClientProtocol, command: Dict[str, Any]
 ) -> None:
     """
     Handle a schema discovery request from the backend.
@@ -327,7 +327,7 @@ async def handle_schema_discovery(
 
 
 async def handle_ping(
-    websocket: websockets.WebSocketServerProtocol, command: Dict[str, Any]
+    websocket: websockets.WebSocketClientProtocol, command: Dict[str, Any]
 ) -> None:
     """
     Handle a ping request to check agent health.
@@ -372,7 +372,7 @@ class AgentPostgreSQL:
             "PING": handle_ping,
         }
 
-    async def connect_to_backend(self) -> Optional[websockets.WebSocketServerProtocol]:
+    async def connect_to_backend(self) -> Optional[websockets.WebSocketClientProtocol]:
         """
         Establish connection to the backend.
 
@@ -391,7 +391,7 @@ class AgentPostgreSQL:
             return None
 
     async def process_message(
-        self, websocket: websockets.WebSocketServerProtocol, message: str
+        self, websocket: websockets.WebSocketClientProtocol, message: str
     ) -> None:
         """
         Process an incoming message from the backend.
@@ -441,7 +441,8 @@ class AgentPostgreSQL:
 
             try:
                 # Listen for messages
-                async for message in websocket:
+                while True:
+                    message = await websocket.recv()
                     await self.process_message(websocket, message)
 
             except websockets.exceptions.ConnectionClosed:

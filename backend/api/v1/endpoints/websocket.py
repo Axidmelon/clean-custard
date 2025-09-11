@@ -26,6 +26,7 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
         agent_id: Unique identifier for the agent
     """
     import logging
+    import asyncio
     logger = logging.getLogger(__name__)
     logger.info(f"WebSocket connection attempt from agent: {agent_id}")
 
