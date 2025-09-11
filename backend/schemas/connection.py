@@ -2,13 +2,22 @@
 import uuid
 from pydantic import BaseModel
 from typing import Optional
+from enum import Enum
+
+
+# --- Database Type Enum ---
+class DatabaseType(str, Enum):
+    POSTGRESQL = "POSTGRESQL"
+    MONGODB = "MONGODB"
+    MYSQL = "MYSQL"
+    SQLITE = "SQLITE"
 
 
 # --- Schema for creating a connection (INPUT) ---
 # The user provides a name and database type.
 class ConnectionCreate(BaseModel):
     name: str
-    db_type: str
+    db_type: DatabaseType
 
 
 # --- Base schema for a connection (shared properties) ---

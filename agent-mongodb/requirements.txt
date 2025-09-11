@@ -1,0 +1,13 @@
+# Custard MongoDB Agent Dependencies
+# Core WebSocket communication with backend
+websockets>=15.0.1
+
+# MongoDB database connectivity for schema discovery and queries
+pymongo>=4.6.0
+motor>=3.3.0  # Async MongoDB driver
+
+# Environment variable management for configuration
+python-dotenv>=1.1.1
+
+# JSON handling for MongoDB documents
+bson>=0.5.10
