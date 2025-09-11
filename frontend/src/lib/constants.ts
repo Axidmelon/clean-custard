@@ -1,7 +1,6 @@
 // Application constants and configuration
 export const APP_CONFIG = {
   // Default values
-  DEFAULT_ORGANIZATION_ID: "00000000-0000-0000-0000-000000000000",
   DEFAULT_API_KEY_PLACEHOLDER: "agent_key_abc123_is_prefilled_here",
   
   // Timeout values (in milliseconds)

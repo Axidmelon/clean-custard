@@ -1,5 +1,6 @@
 # In backend/api/v1/endpoints/auth.py
 import os
+import logging
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from sqlalchemy.orm import Session
@@ -96,11 +97,21 @@ def signup_user(user: UserCreate, request: Request, db: Session = Depends(get_db
         print(f"Error in signup_user: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-    # Get or create default organization
-    default_org = user_service.get_or_create_default_organization(db)
+    # Create a unique organization for this user
+    logger = logging.getLogger(__name__)
+    logger.info(f"Creating unique organization for new user: {user.email}")
+    
+    # Debug: Check if create_user_organization function exists
+    if not hasattr(user_service, 'create_user_organization'):
+        logger.error("create_user_organization function not found in user_service!")
+        raise HTTPException(status_code=500, detail="Organization creation function not available")
+    
+    user_org = user_service.create_user_organization(db, user.email)
+    logger.info(f"Created organization: {user_org.name} with ID: {user_org.id}")
 
-    # Update user with default organization ID
-    user.organization_id = default_org.id
+    # Update user with their unique organization ID
+    user.organization_id = user_org.id
+    logger.info(f"Assigned organization ID {user_org.id} to user: {user.email}")
 
     # Create the user but DO NOT verify them yet
     new_user = user_service.create_user(db=db, user=user)

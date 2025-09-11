@@ -53,8 +53,7 @@ export default function Signup() {
           email: formData.email,
           password: formData.password,
           first_name: formData.firstName,
-          last_name: formData.lastName,
-          organization_id: APP_CONFIG.DEFAULT_ORGANIZATION_ID // This will be overridden by backend
+          last_name: formData.lastName
         }),
       });
 

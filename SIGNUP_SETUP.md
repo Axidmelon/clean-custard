@@ -11,11 +11,12 @@ The frontend signup is now connected to the backend database. Here's what has be
 
 2. **API Route** (`/frontend/src/app/api/auth/signup/route.ts`)
    - Proxies signup requests to backend
-   - Uses default organization ID: `9a4857ae-5f33-4e4d-8fea-663b05bfc35b`
+   - Each user gets their own unique organization ID
    - Handles error responses from backend
 
 3. **Backend Integration** (`/backend/api/v1/endpoints/auth.py`)
    - Creates user in database with hashed password
+   - Creates unique organization for each user
    - Generates verification token
    - Sends verification email
 
@@ -58,14 +59,15 @@ The signup creates a user record with:
 - `id`: UUID (auto-generated)
 - `email`: User's email address
 - `hashed_password`: Bcrypt hashed password
-- `organization_id`: Default organization UUID
+- `organization_id`: Unique organization UUID (one per user)
 - `is_verified`: Boolean (false initially)
 - `verification_token`: UUID for email verification
 - `created_at`: Timestamp
 
 ## Notes
 
-- The system uses a default organization ID for simplicity
+- Each user gets their own unique organization for true multi-tenancy
+- Organization name is based on user's email (e.g., "john@example.com" → "john's Organization")
 - Email verification is required before users can log in
 - Password is hashed using bcrypt before storage
 - All database operations are handled by the backend API

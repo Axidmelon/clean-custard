@@ -77,18 +77,43 @@ def get_user_by_reset_token(db: Session, token: uuid.UUID):
     return db.query(User).filter(User.password_reset_token == token).first()
 
 
-def get_or_create_default_organization(db: Session):
+def create_user_organization(db: Session, user_email: str):
     """
-    Gets or creates a default organization for new users.
+    Creates a unique organization for a new user.
+    Each user gets their own organization for true multi-tenancy.
+    
+    Args:
+        db: Database session
+        user_email: Email address of the user
+        
+    Returns:
+        Organization: The newly created organization with unique ID
+        
+    Note:
+        The organization ID is automatically generated as a UUID by the database
+        and is guaranteed to be unique due to the primary key constraint.
     """
-    # Try to find an existing default organization
-    default_org = db.query(Organization).filter(Organization.name == "Default Organization").first()
-
-    if not default_org:
-        # Create a new default organization
-        default_org = Organization(name="Default Organization")
-        db.add(default_org)
-        db.commit()
-        db.refresh(default_org)
-
-    return default_org
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Create organization name based on user email
+    # Extract domain or use email prefix for organization name
+    if '@' in user_email:
+        email_prefix = user_email.split('@')[0]
+        domain = user_email.split('@')[1]
+        org_name = f"{email_prefix}'s Organization"
+    else:
+        org_name = f"{user_email}'s Organization"
+    
+    logger.info(f"Creating unique organization for user: {user_email}")
+    
+    # Create a new unique organization for this user
+    # The ID will be automatically generated as a UUID by the database
+    user_org = Organization(name=org_name)
+    db.add(user_org)
+    db.commit()
+    db.refresh(user_org)
+    
+    logger.info(f"Created organization '{org_name}' with ID: {user_org.id} for user: {user_email}")
+    
+    return user_org

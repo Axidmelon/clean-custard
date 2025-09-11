@@ -12,6 +12,8 @@ from schemas import connection as connection_schema
 from db.dependencies import get_db
 from ws.connection_manager import manager
 from core.api_key_service import APIKeyService
+from core.jwt_handler import get_current_user
+from schemas.user import User
 
 
 class RefreshSchemaRequest(BaseModel):
@@ -26,7 +28,9 @@ router = APIRouter()
 
 @router.post("", response_model=connection_schema.Connection, status_code=201)
 def create_connection(
-    connection_in: connection_schema.ConnectionCreate, db: Session = Depends(get_db)
+    connection_in: connection_schema.ConnectionCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user())
 ):
     """
     Create a new connection record in the database with a generated API key.
@@ -34,6 +38,7 @@ def create_connection(
     Args:
         connection_in: Connection creation data
         db: Database session
+        current_user: Authenticated user
 
     Returns:
         Created connection object with API key
@@ -42,20 +47,9 @@ def create_connection(
         HTTPException: If connection creation fails
     """
     try:
-        # For now, assume one organization for simplicity
-        # TODO: In a real multi-tenant app, get the org_id from the logged-in user
-        org_id = "9a4857ae-5f33-4e4d-8fea-663b05bfc35b"
-        
-        # Ensure the organization exists, create if it doesn't
-        from db.models import Organization
-        import uuid
-        existing_org = db.query(Organization).filter(Organization.id == uuid.UUID(org_id)).first()
-        if not existing_org:
-            logger.info(f"Creating default organization with ID: {org_id}")
-            default_org = Organization(id=uuid.UUID(org_id), name="Default Organization")
-            db.add(default_org)
-            db.commit()
-            logger.info("Default organization created successfully")
+        # Get organization ID from the authenticated user
+        org_id = current_user.organization_id
+        logger.info(f"Creating connection for organization: {org_id}")
 
         # Generate API key for the agent
         plain_api_key, hashed_api_key = APIKeyService.generate_api_key()
@@ -105,19 +99,26 @@ def create_connection(
 
 
 @router.get("", response_model=List[dict])
-def list_connections(db: Session = Depends(get_db)):
+def list_connections(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user())
+):
     """
-    Retrieve a list of all connection records from the database.
+    Retrieve a list of connection records for the authenticated user's organization.
 
     Args:
         db: Database session
+        current_user: Authenticated user
 
     Returns:
         List of connection objects with basic info (name, db_type, status)
     """
     try:
-        connections = db.query(models.Connection).all()
-        logger.info(f"Retrieved {len(connections)} connections")
+        # Filter connections by user's organization
+        connections = db.query(models.Connection).filter(
+            models.Connection.organization_id == current_user.organization_id
+        ).all()
+        logger.info(f"Retrieved {len(connections)} connections for organization {current_user.organization_id}")
 
         # Return only the essential fields
         result = []
@@ -141,21 +142,29 @@ def list_connections(db: Session = Depends(get_db)):
 
 
 @router.get("/{connection_id}", response_model=connection_schema.Connection)
-def get_connection(connection_id: uuid.UUID, db: Session = Depends(get_db)):
+def get_connection(
+    connection_id: uuid.UUID, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user())
+):
     """
-    Retrieve a specific connection by ID.
+    Retrieve a specific connection by ID, ensuring user has access to it.
 
     Args:
         connection_id: UUID of the connection
         db: Database session
+        current_user: Authenticated user
 
     Returns:
         Connection object
 
     Raises:
-        HTTPException: If connection not found
+        HTTPException: If connection not found or user doesn't have access
     """
-    connection = db.query(models.Connection).filter(models.Connection.id == connection_id).first()
+    connection = db.query(models.Connection).filter(
+        models.Connection.id == connection_id,
+        models.Connection.organization_id == current_user.organization_id
+    ).first()
 
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -168,12 +177,13 @@ async def refresh_schema(
     connection_id: uuid.UUID,
     request_body: RefreshSchemaRequest,  # <-- CHANGE 1: Accept the new model
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user())
 ):
     """
     Trigger database schema refresh for a specific connection.
 
     This endpoint:
-    1. Validates the connection exists in the database
+    1. Validates the connection exists in the database and user has access
     2. Checks if the specified agent is connected
     3. Sends a schema discovery request to that agent
 
@@ -181,18 +191,20 @@ async def refresh_schema(
         connection_id: UUID of the connection
         request_body: Contains the agent_id to target
         db: Database session
+        current_user: Authenticated user
 
     Returns:
         Success message with connection details
 
     Raises:
-        HTTPException: If connection not found or agent not connected
+        HTTPException: If connection not found or user doesn't have access
     """
     try:
-        # Find the connection in the database
-        db_connection = (
-            db.query(models.Connection).filter(models.Connection.id == connection_id).first()
-        )
+        # Find the connection in the database, ensuring user has access
+        db_connection = db.query(models.Connection).filter(
+            models.Connection.id == connection_id,
+            models.Connection.organization_id == current_user.organization_id
+        ).first()
 
         if not db_connection:
             raise HTTPException(status_code=404, detail="Connection not found")
@@ -247,19 +259,27 @@ async def refresh_schema(
 
 
 @router.get("/{connection_id}/status", response_model=dict)
-def get_connection_status(connection_id: uuid.UUID, db: Session = Depends(get_db)):
+def get_connection_status(
+    connection_id: uuid.UUID, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user())
+):
     """
     Get the connection status including agent connectivity.
 
     Args:
         connection_id: UUID of the connection
         db: Database session
+        current_user: Authenticated user
 
     Returns:
         Connection status information
     """
-    # Get the connection from database to find its agent_id
-    connection = db.query(models.Connection).filter(models.Connection.id == connection_id).first()
+    # Get the connection from database to find its agent_id, ensuring user has access
+    connection = db.query(models.Connection).filter(
+        models.Connection.id == connection_id,
+        models.Connection.organization_id == current_user.organization_id
+    ).first()
 
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -277,18 +297,26 @@ def get_connection_status(connection_id: uuid.UUID, db: Session = Depends(get_db
 
 
 @router.delete("/{connection_id}", status_code=204)
-def delete_connection(connection_id: uuid.UUID, db: Session = Depends(get_db)):
+def delete_connection(
+    connection_id: uuid.UUID, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user())
+):
     """
     Delete a connection record.
 
     Args:
         connection_id: UUID of the connection to delete
         db: Database session
+        current_user: Authenticated user
 
     Raises:
-        HTTPException: If connection not found
+        HTTPException: If connection not found or user doesn't have access
     """
-    connection = db.query(models.Connection).filter(models.Connection.id == connection_id).first()
+    connection = db.query(models.Connection).filter(
+        models.Connection.id == connection_id,
+        models.Connection.organization_id == current_user.organization_id
+    ).first()
 
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
