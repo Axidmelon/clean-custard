@@ -1,8 +1,7 @@
-import { Database, Layers, GitBranch, CheckCircle, Snowflake, Loader2, AlertCircle } from "lucide-react";
+import { Database, Layers, GitBranch, CheckCircle, Snowflake, Loader2, AlertCircle, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
 import { CreateConnectionRequest, Connection } from "@/types/api";
@@ -95,7 +94,10 @@ GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE PUBLIC;`;
 
 
 // Connection Form Component with Step 1: Name Your Connection
-function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTemplate }) {
+function ConnectionForm({ databaseTemplate, onStepChange }: { 
+  databaseTemplate: DatabaseTemplate;
+  onStepChange?: (step: number) => void;
+}) {
   const createConnectionMutation = useCreateConnection();
   const [currentStep, setCurrentStep] = useState(1);
   const [connectionName, setConnectionName] = useState('');
@@ -150,11 +152,13 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
       }
       
       setCurrentStep(2);
+      onStepChange?.(2);
     } catch (error) {
       logError('Connection creation failed', error);
       // Even if the API call fails, we can still show Step 2
       // since the main purpose is to show the Docker command
       setCurrentStep(2);
+      onStepChange?.(2);
     }
   };
 
@@ -163,11 +167,6 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
   if (currentStep === 1) {
     return (
       <div className="space-y-6">
-        <div className="text-center">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            Connect to Your {databaseTemplate.name} Database
-          </h3>
-        </div>
         
         <form onSubmit={handleStep1Submit} className="space-y-4">
           {createConnectionMutation.error && (
@@ -196,12 +195,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
             </p>
           </div>
           
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline" disabled={createConnectionMutation.isPending}>
-                Cancel
-              </Button>
-            </DialogClose>
+          <div className="flex justify-end gap-3">
             <Button 
               type="submit" 
               disabled={createConnectionMutation.isPending || !connectionName.trim()}
@@ -216,7 +210,7 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
                 'Generate Connection Command'
               )}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       </div>
     );
@@ -305,20 +299,8 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
 
   return (
     <div className="max-h-[80vh] overflow-y-auto">
-      {/* Header */}
-      <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 -mx-6 mb-6">
-        <div className="text-center">
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">
-            Run the Secure Connector Agent
-          </h3>
-          <p className="text-sm text-gray-600">
-            Set up a secure connection to your database using our lightweight agent.
-          </p>
-        </div>
-      </div>
-      
       {/* Scrollable Content */}
-      <div className="space-y-6 px-1">
+      <div className="space-y-6">
         {/* Security Info */}
         <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-5 shadow-sm">
           <div className="flex items-start space-x-4">
@@ -334,41 +316,11 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
           </div>
         </div>
 
-        {/* Setup Requirements */}
-        <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-5 shadow-sm">
-          <div className="flex items-start space-x-4">
-            <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
-              <AlertCircle className="w-5 h-5 text-yellow-600" />
-            </div>
-            <div className="flex-1">
-              <h4 className="text-sm font-semibold text-yellow-900 mb-2">⚠️ Setup Requirements</h4>
-              <p className="text-sm text-yellow-800 font-medium mb-3">Docker Command Alone is NOT Sufficient</p>
-              <div className="text-sm text-yellow-700 space-y-2">
-                <p>Before running the command below, you must:</p>
-                <ul className="list-disc list-inside space-y-1 ml-4">
-                  <li>Configure your firewall to allow outbound HTTPS (port 443)</li>
-                  <li>Create a read-only database user</li>
-                  <li>Ensure database accessibility from Docker</li>
-                  <li>Test network connectivity</li>
-                </ul>
-                <a 
-                  href="/docs/agent-deployment" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center text-yellow-600 hover:text-yellow-800 underline font-medium text-sm"
-                >
-                  View complete setup guide →
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Generated Command Section */}
         <div className="bg-gradient-to-r from-gray-50 to-slate-50 border border-gray-200 rounded-xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h4 className="text-sm font-semibold text-gray-900">Generated Command</h4>
+              <h4 className="text-sm font-semibold text-gray-900">Docker Command</h4>
               <p className="text-xs text-gray-500 mt-1">
                 ⚠️ Replace placeholder values with your actual database credentials
               </p>
@@ -426,6 +378,36 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
             <p>• Ensure Docker is installed and running</p>
             <p>• Replace placeholder values with your actual credentials</p>
             <p>• <code className="bg-gray-100 px-1 rounded">DB_SSLMODE="require"</code> is set for secure database connections (required for Supabase)</p>
+          </div>
+        </div>
+
+        {/* Setup Requirements */}
+        <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-5 shadow-sm">
+          <div className="flex items-start space-x-4">
+            <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-5 h-5 text-yellow-600" />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-semibold text-yellow-900 mb-2">⚠️ Setup Requirements</h4>
+              <p className="text-sm text-yellow-800 font-medium mb-3">Docker Command Alone is NOT Sufficient</p>
+              <div className="text-sm text-yellow-700 space-y-2">
+                <p>Before running the command above, you must:</p>
+                <ul className="list-disc list-inside space-y-1 ml-4">
+                  <li>Configure your firewall to allow outbound HTTPS (port 443)</li>
+                  <li>Create a read-only database user</li>
+                  <li>Ensure database accessibility from Docker</li>
+                  <li>Test network connectivity</li>
+                </ul>
+                <a 
+                  href="/docs/agent-deployment" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center text-yellow-600 hover:text-yellow-800 underline font-medium text-sm"
+                >
+                  View complete setup guide →
+                </a>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -495,16 +477,6 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
           </a>
         </div>
         
-        {/* Connection Status */}
-        <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-5 shadow-sm">
-          <h4 className="text-sm font-semibold text-gray-900 mb-3">Connection Status</h4>
-          <div className="flex items-center p-4 bg-yellow-100 border border-yellow-300 rounded-lg">
-            <div className="flex items-center space-x-3">
-              <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
-              <span className="text-sm font-medium text-yellow-800">Waiting for connection...</span>
-            </div>
-          </div>
-        </div>
 
         {/* Post-Deployment Verification */}
         <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-5 shadow-sm">
@@ -524,33 +496,32 @@ function ConnectionForm({ databaseTemplate }: { databaseTemplate: DatabaseTempla
         </div>
       </div>
       
-      {/* Sticky Footer */}
-      <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 -mx-6 mt-6">
-        <div className="flex justify-between">
-          <Button 
-            variant="outline" 
-            onClick={() => setCurrentStep(1)}
-            disabled={createConnectionMutation.isPending}
-            className="shadow-sm"
-          >
-            Back
-          </Button>
-          <DialogClose asChild>
-            <Button 
-              className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-              disabled={createConnectionMutation.isPending}
-            >
-              Done - View Connection
-            </Button>
-          </DialogClose>
-        </div>
+      {/* Footer */}
+      <div className="flex justify-between pt-6 border-t border-gray-200">
+        <Button 
+          variant="outline" 
+          onClick={() => setCurrentStep(1)}
+          disabled={createConnectionMutation.isPending}
+          className="shadow-sm"
+        >
+          Back
+        </Button>
+        <Button 
+          className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+          disabled={createConnectionMutation.isPending}
+        >
+          Done - View Connection
+        </Button>
       </div>
     </div>
   );
 }
 
 // Simple Database Card Component (no status, just name and connect icon)
-function DatabaseCard({ databaseTemplate }: { databaseTemplate: DatabaseTemplate }) {
+function DatabaseCard({ databaseTemplate, onConnect }: { 
+  databaseTemplate: DatabaseTemplate;
+  onConnect: (template: DatabaseTemplate) => void;
+}) {
   const IconComponent = databaseTemplate.icon;
   
   const getIconBgColor = (color: string) => {
@@ -579,24 +550,14 @@ function DatabaseCard({ databaseTemplate }: { databaseTemplate: DatabaseTemplate
           
           <div className="space-y-3">
             <h3 className="font-semibold text-gray-900 text-lg">{databaseTemplate.name}</h3>
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
-                  <GitBranch className="w-4 h-4 mr-2" />
-                  Connect
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-hidden">
-                <DialogHeader>
-                  <DialogTitle>Connect to {databaseTemplate.name}</DialogTitle>
-                  <DialogDescription>
-                    Enter your {databaseTemplate.name} credentials to establish a connection.
-                  </DialogDescription>
-                </DialogHeader>
-                
-                <ConnectionForm databaseTemplate={databaseTemplate} />
-              </DialogContent>
-            </Dialog>
+            <Button 
+              size="sm" 
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => onConnect(databaseTemplate)}
+            >
+              <GitBranch className="w-4 h-4 mr-2" />
+              Connect
+            </Button>
           </div>
         </div>
       </CardContent>
@@ -741,6 +702,99 @@ function SimpleConnectionCard({ connection, onDelete }: {
   );
 }
 
+// Bottom Bar Component for Connection Form
+function ConnectionBottomBar({ 
+  databaseTemplate, 
+  isOpen, 
+  onClose,
+  currentStep,
+  onStepChange
+}: { 
+  databaseTemplate: DatabaseTemplate | null;
+  isOpen: boolean;
+  onClose: () => void;
+  currentStep: number;
+  onStepChange: (step: number) => void;
+}) {
+  if (!isOpen || !databaseTemplate) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div 
+        className="fixed bg-black bg-opacity-50 z-40"
+        onClick={onClose}
+        style={{ 
+          top: '-100px',
+          left: 0, 
+          right: 0, 
+          bottom: 0,
+          width: '100vw',
+          height: 'calc(100vh + 100px)',
+          position: 'fixed'
+        }}
+      />
+      
+      {/* Bottom Bar */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50 rounded-t-2xl">
+        <div className="max-w-7xl mx-auto p-6">
+          {currentStep === 1 && (
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
+                  <databaseTemplate.icon className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Connect to {databaseTemplate.name}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    Enter your {databaseTemplate.name} credentials to establish a connection
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClose}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+          )}
+          
+          {currentStep === 2 && (
+            <div className="relative flex items-center justify-center mb-4">
+              <div className="text-center">
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Run the Secure Connector Agent
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Set up a secure connection to your database using our lightweight agent.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClose}
+                className="absolute right-0 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+          )}
+          
+          <ConnectionForm 
+            databaseTemplate={databaseTemplate} 
+            onStepChange={onStepChange}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function Connections() {
   const { 
     data: connections, 
@@ -749,7 +803,25 @@ export default function Connections() {
   } = useConnectionsWithDetails();
   
   const deleteConnectionMutation = useDeleteConnection();
+  const [selectedDatabaseTemplate, setSelectedDatabaseTemplate] = useState<DatabaseTemplate | null>(null);
+  const [isBottomBarOpen, setIsBottomBarOpen] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
 
+  const handleConnect = (template: DatabaseTemplate) => {
+    setSelectedDatabaseTemplate(template);
+    setIsBottomBarOpen(true);
+    setCurrentStep(1);
+  };
+
+  const handleCloseBottomBar = () => {
+    setIsBottomBarOpen(false);
+    setSelectedDatabaseTemplate(null);
+    setCurrentStep(1);
+  };
+
+  const handleStepChange = (step: number) => {
+    setCurrentStep(step);
+  };
 
   const handleDeleteConnection = async (connectionId: string) => {
     if (window.confirm('Are you sure you want to delete this connection?')) {
@@ -761,7 +833,6 @@ export default function Connections() {
       }
     }
   };
-
 
   return (
     <div className="space-y-8">
@@ -777,6 +848,26 @@ export default function Connections() {
           <GitBranch className="w-4 h-4 mr-2" />
           Request Integration
         </Button>
+      </div>
+
+      {/* Databases Section */}
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Databases</h2>
+          <p className="text-sm text-muted-foreground">
+            Connect to your database sources
+          </p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {databaseTemplates.map((template) => (
+            <DatabaseCard 
+              key={template.id} 
+              databaseTemplate={template} 
+              onConnect={handleConnect}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Your Connections Section */}
@@ -830,21 +921,14 @@ export default function Connections() {
         )}
       </div>
 
-      {/* Databases Section */}
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-xl font-semibold text-foreground mb-2">Databases</h2>
-          <p className="text-sm text-muted-foreground">
-            Connect to your database sources
-          </p>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {databaseTemplates.map((template) => (
-            <DatabaseCard key={template.id} databaseTemplate={template} />
-          ))}
-        </div>
-      </div>
+      {/* Bottom Bar for Connection Form */}
+      <ConnectionBottomBar
+        databaseTemplate={selectedDatabaseTemplate}
+        isOpen={isBottomBarOpen}
+        onClose={handleCloseBottomBar}
+        currentStep={currentStep}
+        onStepChange={handleStepChange}
+      />
     </div>
   );
 }
