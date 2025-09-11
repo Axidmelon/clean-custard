@@ -84,11 +84,6 @@ export default function TalkData() {
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-3rem)]">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-foreground">Talk Data</h1>
-        <p className="text-muted-foreground mt-1">
-          Ask questions about your data in natural language
-        </p>
-        
         {/* Connection Selection */}
         <div className="mt-4 flex gap-4 items-center">
           <div className="flex items-center gap-2">
@@ -198,7 +193,7 @@ export default function TalkData() {
       </div>
 
       {/* Input Bar */}
-      <div className="border-t border-border pt-4 bg-background">
+      <div className="pt-4 bg-background">
         <form onSubmit={handleSubmit} className="flex gap-3">
           <Input
             ref={inputRef}
