@@ -3,7 +3,6 @@ import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart3, CheckCircle, XCircle, Loader2 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth-hooks";
 import { getApiBaseUrl, APP_CONFIG } from "@/lib/constants";
 import { logUserAction, logError } from "@/lib/logger";
@@ -11,8 +10,8 @@ import { logUserAction, logError } from "@/lib/logger";
 export default function EmailVerification() {
   const [searchParams] = useSearchParams();
   const [verificationStatus, setVerificationStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [isVerifying, setIsVerifying] = useState(false);
   const navigate = useNavigate();
-  const { toast } = useToast();
   const { login } = useAuth();
 
   useEffect(() => {
@@ -23,6 +22,13 @@ export default function EmailVerification() {
         setVerificationStatus('error');
         return;
       }
+
+      // Prevent multiple verification attempts
+      if (isVerifying || verificationStatus !== 'loading') {
+        return;
+      }
+
+      setIsVerifying(true);
 
       try {
         // Call the backend verification API
@@ -45,10 +51,6 @@ export default function EmailVerification() {
         login(result.user, result.access_token);
         
         setVerificationStatus('success');
-        toast({
-          title: "Email verified successfully!",
-          description: "You have been automatically logged in. Welcome to Custard Analytics!",
-        });
         
         // Redirect to dashboard after 2 seconds
         setTimeout(() => {
@@ -58,16 +60,13 @@ export default function EmailVerification() {
       } catch (error) {
         logError("Email verification failed", error);
         setVerificationStatus('error');
-        toast({
-          title: "Verification failed",
-          description: error instanceof Error ? error.message : "The verification link is invalid or has expired.",
-          variant: "destructive",
-        });
+      } finally {
+        setIsVerifying(false);
       }
     };
 
     verifyEmail();
-  }, [searchParams, navigate, toast, login]);
+  }, [searchParams.get('token')]); // Only depend on the token, not the entire searchParams object
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 flex items-center justify-center p-4">

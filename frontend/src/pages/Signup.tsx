@@ -72,9 +72,26 @@ export default function Signup() {
       });
     } catch (error) {
       logError("Signup failed", error);
+      const errorMessage = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+      
+      // Show more specific error message based on the error type
+      let toastTitle = "Signup Error";
+      let toastDescription = errorMessage;
+      
+      if (errorMessage.includes("Email already registered")) {
+        toastTitle = "Account Already Exists";
+        toastDescription = "An account with this email already exists. Please try logging in instead or use a different email address.";
+      } else if (errorMessage.includes("Internal server error")) {
+        toastTitle = "Server Error";
+        toastDescription = "Something went wrong on our end. Please try again in a few moments.";
+      } else if (errorMessage.includes("Organization creation function not available")) {
+        toastTitle = "Service Unavailable";
+        toastDescription = "Account creation is temporarily unavailable. Please try again later.";
+      }
+      
       toast({
-        title: "Signup failed",
-        description: error instanceof Error ? error.message : "Something went wrong. Please try again.",
+        title: toastTitle,
+        description: toastDescription,
         variant: "destructive",
       });
     } finally {

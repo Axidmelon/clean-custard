@@ -117,9 +117,14 @@ def signup_user(user: UserCreate, request: Request, db: Session = Depends(get_db
     new_user = user_service.create_user(db=db, user=user)
 
     # Generate a new verification token upon creation
-    new_user.verification_token = uuid.uuid4()
+    verification_token = uuid.uuid4()
+    new_user.verification_token = verification_token
     db.commit()
     db.refresh(new_user)
+    
+    # Debug logging
+    logger.info(f"Generated verification token for user {new_user.email}: {verification_token}")
+    logger.info(f"Token stored in DB: {new_user.verification_token}")
 
     # Construct the verification link
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:8080")
@@ -145,13 +150,13 @@ def login_user(login_data: LoginRequest, request: Request, db: Session = Depends
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    # Check if user is verified first (before password verification for better UX)
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Please verify your email before logging in")
+
     # Verify password
     if not user_service.verify_password(login_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    # Check if user is verified
-    if not user.is_verified:
-        raise HTTPException(status_code=403, detail="Please verify your email before logging in")
 
     # Create access token
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
@@ -166,6 +171,13 @@ def login_user(login_data: LoginRequest, request: Request, db: Session = Depends
 def verify_user_email(token: uuid.UUID, db: Session = Depends(get_db)):
     # Find the user by the verification token
     user = user_service.get_user_by_verification_token(db, token=token)
+    
+    # Debug logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Verification attempt for token: {token}")
+    logger.info(f"User found: {user is not None}")
+    if user:
+        logger.info(f"User email: {user.email}, is_verified: {user.is_verified}")
 
     if not user:
         raise HTTPException(status_code=404, detail="Invalid or expired verification token.")

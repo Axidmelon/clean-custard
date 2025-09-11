@@ -76,9 +76,24 @@ export default function Login() {
         setForgotPasswordEmail(email); // Pre-fill with the email they tried to login with
       }
       
+      // Show more specific error message based on the error type
+      let toastTitle = "Authentication Error";
+      let toastDescription = errorMessage;
+      
+      if (errorMessage.includes("Invalid email or password")) {
+        toastTitle = "Incorrect Password";
+        toastDescription = "The password you entered is incorrect. Please try again or reset your password.";
+      } else if (errorMessage.includes("verify your email")) {
+        toastTitle = "Email Not Verified";
+        toastDescription = "Please check your email and click the verification link before logging in.";
+      } else if (errorMessage.includes("already registered")) {
+        toastTitle = "Account Already Exists";
+        toastDescription = "An account with this email already exists. Please try logging in instead.";
+      }
+      
       toast({
-        title: "Login failed",
-        description: errorMessage,
+        title: toastTitle,
+        description: toastDescription,
         variant: "destructive",
       });
     } finally {
