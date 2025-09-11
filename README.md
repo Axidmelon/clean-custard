@@ -149,7 +149,7 @@ docker run -d \
   -e DB_PASSWORD="your-password" \
   -e DB_NAME="your-database" \
   -e DB_SSLMODE="require" \
-  custard/agent:latest
+  custard/agent-postgresql:latest
 ```
 
 ## 🛡️ Production Safeguards

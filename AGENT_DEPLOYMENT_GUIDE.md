@@ -134,7 +134,7 @@ docker run -d \
   -e DB_USER="custard_agent" \
   -e DB_PASSWORD="your_secure_password" \
   -e DB_NAME="production_database" \
-  custard/agent:latest
+  custard/agent-postgresql:latest
 ```
 
 ### Step 6: Run the Agent
@@ -152,7 +152,7 @@ docker run -d \
   -e DB_USER="custard_agent" \
   -e DB_PASSWORD="your_secure_password" \
   -e DB_NAME="production_database" \
-  custard/agent:latest
+  custard/agent-postgresql:latest
 ```
 
 ### Step 7: Verify Deployment
@@ -303,7 +303,7 @@ docker logs agent-postgresql-production-db | grep ERROR
 
 ```bash
 # Pull latest agent image
-docker pull custard/agent:latest
+docker pull custard/agent-postgresql:latest
 
 # Stop and remove old container
 docker stop agent-postgresql-production-db
@@ -334,7 +334,7 @@ If you encounter issues not covered in this guide:
 
 ```bash
 # Run agent
-docker run -d --name agent-postgresql-[name] -e [env-vars] custard/agent:latest
+docker run -d --name agent-postgresql-[name] -e [env-vars] custard/agent-postgresql:latest
 
 # Check status
 docker ps | grep agent-postgresql

@@ -1,4 +1,4 @@
-# File: agent/schema_discoverer.py
+# File: agent-postgresql/schema_discoverer.py
 
 import os
 import psycopg2
