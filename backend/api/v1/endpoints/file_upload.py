@@ -222,9 +222,24 @@ async def list_uploaded_files(
     Get list of uploaded files for the current user
     """
     try:
+        logger.info(f"Listing files for user {current_user.id}")
+        
+        # Test database connection first
+        try:
+            db.execute("SELECT 1")
+            logger.debug("Database connection test successful")
+        except Exception as db_error:
+            logger.error(f"Database connection test failed: {db_error}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Database connection error: {str(db_error)}"
+            )
+        
         uploaded_files = db.query(UploadedFile).filter(
             UploadedFile.user_id == current_user.id
         ).order_by(UploadedFile.created_at.desc()).all()
+        
+        logger.info(f"Found {len(uploaded_files)} files for user {current_user.id}")
         
         files_data = []
         for file in uploaded_files:
@@ -234,6 +249,7 @@ async def list_uploaded_files(
             except (ValueError, TypeError):
                 # If conversion fails, use 0 as default
                 file_size = 0
+                logger.warning(f"Could not convert file_size to int for file {file.id}: {file.file_size}")
                 
             files_data.append({
                 "id": str(file.id),
@@ -247,17 +263,23 @@ async def list_uploaded_files(
                 "updated_at": file.updated_at.isoformat() if file.updated_at else None
             })
         
+        logger.info(f"Successfully processed {len(files_data)} files")
+        
         return {
             "success": True,
             "files": files_data,
             "count": len(files_data)
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Unexpected error retrieving uploaded files: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while retrieving files"
+            detail=f"An unexpected error occurred while retrieving files: {str(e)}"
         )
 
 @router.get("/status")

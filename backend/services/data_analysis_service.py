@@ -186,8 +186,18 @@ PANDAS CODE:
                 logger.error(f"Could not fetch content for file_id: {file_id}")
                 return None
             
+            # Validate content is actually CSV, not HTML or other formats
+            if not self._is_valid_csv_content(content):
+                logger.error(f"File content is not valid CSV format for file_id: {file_id}")
+                raise ValueError("File content is not valid CSV format. Please upload a proper CSV file.")
+            
             # Parse CSV content
             df = pd.read_csv(StringIO(content))
+            
+            # Validate DataFrame was created successfully
+            if df.empty:
+                logger.warning(f"CSV file is empty for file_id: {file_id}")
+                raise ValueError("CSV file appears to be empty or contains no valid data.")
             
             # Cache the data
             self.csv_cache[file_id] = df
@@ -532,6 +542,62 @@ PANDAS CODE:
             logger.error(f"Error generating natural response: {e}")
             return "Query completed successfully."
     
+    def _is_valid_csv_content(self, content: str) -> bool:
+        """
+        Validate that content is actually CSV format, not HTML or other formats.
+        
+        Args:
+            content: File content to validate
+            
+        Returns:
+            True if content appears to be valid CSV, False otherwise
+        """
+        try:
+            # Check for HTML tags
+            if re.search(r'<[^>]+>', content):
+                logger.warning("Content contains HTML tags, not valid CSV")
+                return False
+            
+            # Check for common HTML patterns
+            html_patterns = [
+                r'<!DOCTYPE\s+html',
+                r'<html[^>]*>',
+                r'<head[^>]*>',
+                r'<body[^>]*>',
+                r'<meta[^>]*>',
+                r'<title[^>]*>',
+                r'<script[^>]*>',
+                r'<style[^>]*>'
+            ]
+            
+            for pattern in html_patterns:
+                if re.search(pattern, content, re.IGNORECASE):
+                    logger.warning(f"Content matches HTML pattern: {pattern}")
+                    return False
+            
+            # Check for basic CSV structure (at least one comma-separated line)
+            lines = content.strip().split('\n')
+            if len(lines) < 1:
+                logger.warning("Content has no lines")
+                return False
+            
+            # Check if first few lines contain commas (basic CSV indicator)
+            csv_lines = 0
+            for line in lines[:5]:  # Check first 5 lines
+                if ',' in line and not line.strip().startswith('#'):
+                    csv_lines += 1
+            
+            if csv_lines == 0:
+                logger.warning("No comma-separated lines found in content")
+                return False
+            
+            logger.debug("Content appears to be valid CSV format")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating CSV content: {e}")
+            return False
+
     def clear_cache(self, file_id: Optional[str] = None):
         """
         Clear cache for specific file or all files.

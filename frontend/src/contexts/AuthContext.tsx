@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { getStoredToken, getStoredTokenData, storeToken, clearStoredToken, isTokenExpired } from '@/lib/tokenUtils';
+import { getStoredToken, storeToken, clearStoredToken, isTokenExpired } from '@/lib/tokenUtils';
 import { logError, logDebug } from '@/lib/logger';
-import { User, AuthContextType, AuthProviderProps } from './auth-constants';
+import { User, AuthProviderProps } from './auth-constants';
 import { AuthContext } from './auth-context';
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {

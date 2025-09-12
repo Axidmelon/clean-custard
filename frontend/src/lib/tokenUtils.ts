@@ -19,8 +19,8 @@ export interface DecodedToken {
 const TOKEN_KEY = 'access_token';
 const TOKEN_DATA_KEY = 'token_data';
 
-// Token expiration buffer (5 minutes before actual expiration)
-const TOKEN_BUFFER_MS = 5 * 60 * 1000;
+// Token expiration buffer (30 seconds before actual expiration for API calls)
+const TOKEN_BUFFER_MS = 30 * 1000;
 
 /**
  * Decode JWT token without verification (client-side only)
@@ -43,9 +43,23 @@ export const decodeToken = (token: string): DecodedToken | null => {
 };
 
 /**
- * Check if token is expired or will expire soon
+ * Check if token is actually expired (for authentication persistence)
  */
 export const isTokenExpired = (token: string): boolean => {
+  const decoded = decodeToken(token);
+  if (!decoded) return true;
+  
+  const now = Date.now() / 1000; // Convert to seconds
+  const expirationTime = decoded.exp;
+  
+  // Only consider actually expired tokens as expired
+  return now >= expirationTime;
+};
+
+/**
+ * Check if token is expired or will expire soon (for API calls)
+ */
+export const isTokenExpiredForApi = (token: string): boolean => {
   const decoded = decodeToken(token);
   if (!decoded) return true;
   
@@ -198,7 +212,7 @@ export const clearStoredToken = (): void => {
 };
 
 /**
- * Check if user needs to refresh token soon
+ * Check if user needs to refresh token soon (for API calls)
  */
 export const shouldRefreshToken = (token: string): boolean => {
   const timeUntilExpiration = getTimeUntilExpiration(token);
