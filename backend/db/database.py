@@ -33,7 +33,6 @@ if "postgresql" in SQLALCHEMY_DATABASE_URL:
         "options": "-c default_transaction_isolation=read_committed",
         "application_name": "custard-backend",
         "connect_timeout": 30,  # Increased from 10 to 30 seconds
-        "command_timeout": 60,  # Add command timeout
         "server_side_cursors": False,  # Disable server-side cursors for better compatibility
     })
 
