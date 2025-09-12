@@ -1,15 +1,18 @@
 import React, { useState } from "react";
+import { Plus, Send } from "lucide-react";
 
 interface SimpleChatEditorProps {
   onSubmit: (content: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  onFileUpload?: () => void;
 }
 
 export const SimpleChatEditor: React.FC<SimpleChatEditorProps> = ({
   onSubmit,
   disabled = false,
-  placeholder = "Ask a question about your data...",
+  placeholder = "Connect data and start chatting!",
+  onFileUpload,
 }) => {
   const [input, setInput] = useState("");
 
@@ -28,42 +31,51 @@ export const SimpleChatEditor: React.FC<SimpleChatEditorProps> = ({
   };
 
   return (
-    <div className="flex gap-3 w-full">
-      {/* Plus button for file upload */}
-      <button
-        type="button"
-        className="flex items-center justify-center w-12 h-12 border border-border rounded-lg bg-card hover:bg-accent hover:text-accent-foreground transition-colors"
-        disabled={disabled}
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-        </svg>
-      </button>
-
-      {/* Simple Text Input */}
-      <div className="flex-1 min-h-12 border border-border rounded-lg overflow-hidden">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+    <div className="relative w-full">
+      {/* Modern Chat Input Container */}
+      <div className="relative flex items-center w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/50">
+        
+        {/* Plus Button */}
+        <button
+          type="button"
+          onClick={onFileUpload}
+          className="flex items-center justify-center w-10 h-10 m-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-200 group"
           disabled={disabled}
-          className="w-full h-12 px-4 py-3 bg-card border-none focus:outline-none resize-none"
-          rows={1}
-        />
+        >
+          <Plus className="w-5 h-5 text-gray-600 dark:text-gray-400 group-hover:text-gray-800 dark:group-hover:text-gray-200 transition-colors" />
+        </button>
+
+        {/* Input Field */}
+        <div className="flex-1 px-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            disabled={disabled}
+            className="w-full min-h-12 max-h-32 py-3 px-2 bg-transparent border-none focus:outline-none resize-none text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 text-sm leading-relaxed"
+            rows={1}
+            style={{
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+            }}
+          />
+        </div>
+
+
+        {/* Send Button */}
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={disabled || !input.trim()}
+          className="flex items-center justify-center w-10 h-10 m-2 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed group"
+        >
+          <Send className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+        </button>
       </div>
 
-      {/* Send button */}
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={disabled || !input.trim()}
-        className="flex items-center justify-center w-12 h-12 bg-primary hover:bg-primary-hover text-primary-foreground rounded-lg transition-colors disabled:opacity-50"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-        </svg>
-      </button>
+      {/* Subtle gradient overlay for extra modern look */}
+      <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-purple-500/5 rounded-2xl pointer-events-none" />
     </div>
   );
 };

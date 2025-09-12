@@ -1,4 +1,14 @@
 import React from "react";
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
+import { FileSpreadsheet, BarChart3 } from "lucide-react";
 
 interface CsvData {
   headers: string[];
@@ -9,56 +19,97 @@ interface CsvData {
 interface SimpleDataTableProps {
   csvData: CsvData;
   maxPreviewRows?: number;
+  filename?: string;
 }
 
 export const SimpleDataTable: React.FC<SimpleDataTableProps> = ({
   csvData,
   maxPreviewRows = 50,
+  filename,
 }) => {
+  const displayedRows = csvData.rows.slice(0, maxPreviewRows);
+  const hasMoreRows = csvData.totalRows > maxPreviewRows;
+
   return (
-    <div className="w-full overflow-hidden">
-      <div className="border border-gray-600 rounded-lg bg-background w-full overflow-hidden">
-        <div className="max-h-80 overflow-auto scrollbar-hide">
-          <div className="overflow-x-auto scrollbar-hide">
-            <table className="w-full border-collapse">
-              <thead className="sticky top-0 bg-muted/50">
-                <tr>
-                  <th colSpan={csvData.headers.length} className="px-3 py-3 text-center font-semibold border-b border-gray-600 bg-muted/50">
-                    <div className="flex items-center justify-center gap-2">
-                      <svg className="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <span className="text-lg font-semibold">Data Preview</span>
-                    </div>
-                  </th>
-                </tr>
-                <tr>
-                  {csvData.headers.map((header, index) => (
-                    <th key={index} className="px-3 py-2 text-left font-medium border-b border-r border-gray-600 bg-muted/50 last:border-r-0 min-w-32">
-                      <div className="truncate" title={header}>
-                        {header}
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {csvData.rows.slice(0, maxPreviewRows).map((row, rowIndex) => (
-                  <tr key={rowIndex} className="hover:bg-muted/20">
-                    {row.map((cell, cellIndex) => (
-                      <td key={cellIndex} className="px-3 py-2 border-b border-r border-gray-600 last:border-r-0 min-w-32">
-                        <div className="truncate" title={cell}>
-                          {cell || <span className="text-muted-foreground italic">empty</span>}
-                        </div>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    <div className="w-full space-y-2">
+      {/* Header Card */}
+      <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800">
+        <div className="p-3">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+              <FileSpreadsheet className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {filename || 'Data Preview'}
+              </h3>
+            </div>
           </div>
         </div>
-      </div>
+      </Card>
+
+      {/* Modern Table */}
+      <Card className="overflow-hidden border-0 shadow-lg bg-white dark:bg-gray-900">
+        <div className="relative">
+          {/* Gradient overlay for modern look */}
+          <div className="absolute inset-0 bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/30 dark:from-gray-900 dark:via-blue-950/10 dark:to-indigo-950/10 pointer-events-none" />
+          
+          <div className="relative max-h-64 overflow-auto">
+            <Table className="w-full">
+              <TableHeader className="sticky top-0 z-10">
+                <TableRow className="border-b border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30">
+                  {csvData.headers.map((header, index) => (
+                    <TableHead 
+                      key={index} 
+                      className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300 min-w-32"
+                    >
+                      <div className="flex items-center gap-1">
+                        <div className="p-0.5 bg-blue-100 dark:bg-blue-900/40 rounded">
+                          <BarChart3 className="w-2.5 h-2.5 text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <span className="truncate text-xs font-medium" title={header}>
+                          {header}
+                        </span>
+                      </div>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {displayedRows.map((row, rowIndex) => (
+                  <TableRow 
+                    key={rowIndex} 
+                    className="border-b border-gray-100 dark:border-gray-800 hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-indigo-50/50 dark:hover:from-blue-950/20 dark:hover:to-indigo-950/20 transition-all duration-200"
+                  >
+                    {row.map((cell, cellIndex) => (
+                      <TableCell 
+                        key={cellIndex} 
+                        className="px-3 py-2 text-xs min-w-32 hover:bg-white/50 dark:hover:bg-gray-800/50 transition-colors duration-200"
+                      >
+                        <div className="flex items-center">
+                          {cell ? (
+                            <span 
+                              className="truncate text-gray-700 dark:text-gray-300" 
+                              title={cell}
+                            >
+                              {cell}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 dark:text-gray-500 italic text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full">
+                              empty
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </Card>
+
     </div>
   );
 };

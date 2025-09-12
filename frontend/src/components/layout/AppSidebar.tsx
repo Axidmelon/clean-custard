@@ -57,7 +57,7 @@ export function AppSidebar() {
     return 'User';
   };
   return <Sidebar className="border-r border-border bg-sidebar-bg" collapsible="icon">
-      <SidebarHeader className="p-6 border-b border-border">
+      <SidebarHeader className={`border-b border-border ${open ? 'p-6' : 'p-3'}`}>
         {open ? (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -79,33 +79,33 @@ export function AppSidebar() {
             </Button>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-primary-foreground" />
+          <div className="flex flex-col items-center gap-1">
+            <div className="w-6 h-6 rounded-lg bg-primary flex items-center justify-center">
+              <BarChart3 className="w-4 h-4 text-primary-foreground" />
             </div>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setOpen(!open)}
-              className="h-6 w-6 p-0 hover:bg-sidebar-hover"
+              className="h-5 w-5 p-0 hover:bg-sidebar-hover"
             >
-              <ChevronRight className="h-3 w-3" />
+              <ChevronRight className="h-2.5 w-2.5" />
             </Button>
           </div>
         )}
       </SidebarHeader>
 
-      <SidebarContent className={`flex-1 py-6 ${open ? 'px-4' : 'px-2'}`}>
+      <SidebarContent className={`flex-1 ${open ? 'py-6 px-4' : 'py-3 px-1'}`}>
         <SidebarGroup className="flex-1">
-          <SidebarGroupLabel className="px-3 mb-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <SidebarGroupLabel className={`text-xs font-medium text-muted-foreground uppercase tracking-wider ${open ? 'px-3 mb-3' : 'px-1 mb-1'}`}>
             {open ? "Navigation" : ""}
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu className="space-y-2">
+            <SidebarMenu className={open ? "space-y-2" : "space-y-1"}>
               {navigationItems.map(item => <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild tooltip={item.title}>
                     <NavLink to={item.url} className={getNavClassName(item.url)}>
-                      <item.icon className="w-4 h-4" />
+                      <item.icon className={open ? "w-4 h-4" : "w-3.5 h-3.5"} />
                       {open && <span className="ml-3">{item.title}</span>}
                     </NavLink>
                   </SidebarMenuButton>
@@ -115,8 +115,8 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className={`border-t border-border ${open ? 'p-4' : 'p-2'}`}>
-        <SidebarMenu className="space-y-2">
+      <SidebarFooter className={`border-t border-border ${open ? 'p-4' : 'p-1'}`}>
+        <SidebarMenu className={open ? "space-y-2" : "space-y-1"}>
           {/* User Info */}
           {open && user && (
             <div className="px-3 py-2 bg-muted/30 rounded-md">
@@ -139,7 +139,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip="Settings">
               <NavLink to="/settings" className={getNavClassName("/settings")}>
-                <Settings className="w-4 h-4" />
+                <Settings className={open ? "w-4 h-4" : "w-3.5 h-3.5"} />
                 {open && <span className="ml-3">Settings</span>}
               </NavLink>
             </SidebarMenuButton>

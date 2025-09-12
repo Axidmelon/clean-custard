@@ -2,12 +2,11 @@ import { useState, useRef, useEffect } from "react";
 import { Bot, User, Database, RefreshCw, Upload, FileText, X, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Callout, CalloutTitle, CalloutDescription } from "@/components/ui/callout";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useConnections } from "@/hooks/useConnections";
 import { queryService } from "@/services/queryService";
-import { QueryRequest, QueryResponse } from "@/types/api";
+import { QueryResponse } from "@/types/api";
 import { useFileUpload } from "@/contexts/FileUploadContext";
 import { signedUrlService } from "@/services/signedUrlService";
 import { SimpleChatEditor } from "@/components/blocknote/SimpleChatEditor";
@@ -648,13 +647,13 @@ export default function TalkData() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-full overflow-hidden">
-      <div className="mb-6 px-4">
+    <div className="flex flex-col h-full w-full overflow-hidden">
+      <div className="mb-4 px-2">
         {/* Connection and CSV File Selection */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {/* CSV File Selection */}
           <div className="w-full">
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-2 mb-2">
               <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm font-medium">CSV File:</span>
             </div>
@@ -683,7 +682,7 @@ export default function TalkData() {
 
           {/* Database Selection */}
           <div className="w-full">
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-2 mb-2">
               <Database className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm font-medium">Database:</span>
             </div>
@@ -712,7 +711,7 @@ export default function TalkData() {
         
         {/* Agent Status Indicator */}
         {selectedConnectionId && agentStatus[selectedConnectionId] !== undefined && (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted mt-3">
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted mt-2">
             <div className={`w-2 h-2 rounded-full ${
               agentStatus[selectedConnectionId] ? 'bg-green-500' : 'bg-red-500'
             }`} />
@@ -782,7 +781,11 @@ export default function TalkData() {
                 </div>
               </div>
             ) : csvData ? (
-              <SimpleDataTable csvData={csvData} maxPreviewRows={MAX_PREVIEW_ROWS} />
+              <SimpleDataTable 
+                csvData={csvData} 
+                maxPreviewRows={MAX_PREVIEW_ROWS}
+                filename={uploadedFiles.find(file => file.id === selectedCsvFileId)?.name}
+              />
             ) : csvLoadProgress.stage === 'error' ? (
               <div className="space-y-3">
                 <div className="text-red-600 font-medium">
@@ -862,50 +865,101 @@ export default function TalkData() {
                 )}
                 
                 {message.code && (
-                  <div className="mt-3 p-3 bg-muted rounded-md border">
-                    <pre className="text-xs font-mono text-muted-foreground overflow-x-auto">
-                      <code>{message.code}</code>
-                    </pre>
-                  </div>
+                  <Card className="mt-4 overflow-hidden border-0 shadow-lg bg-gray-900 dark:bg-gray-950">
+                    <div className="relative">
+                      <div className="p-4 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-900 dark:from-gray-900 dark:to-gray-950">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1 bg-blue-100 dark:bg-blue-900/40 rounded">
+                            <Database className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                          </div>
+                          <span className="text-sm font-semibold text-gray-200 dark:text-gray-300">
+                            SQL Query
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <pre className="text-sm font-mono text-gray-300 dark:text-gray-400 overflow-x-auto whitespace-pre-wrap">
+                          <code className="text-green-400">{message.code}</code>
+                        </pre>
+                      </div>
+                    </div>
+                  </Card>
                 )}
                 
                 {message.data && message.data.length > 0 && message.columns && (
-                  <div className="mt-3">
-                    <div className="text-xs text-muted-foreground mb-2">
-                      Results ({message.row_count} rows, showing first 10 columns):
-                    </div>
-                    <div className="overflow-x-auto border rounded-md">
-                      <table className="w-full text-xs">
-                        <thead className="bg-muted/50">
-                          <tr>
-                            {message.columns.slice(0, 10).map((column, index) => (
-                              <th key={index} className="px-3 py-2 text-left font-medium border-b">
-                                {column}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {message.data.slice(0, 100).map((row, rowIndex) => (
-                            <tr key={rowIndex} className="hover:bg-muted/20">
-                              {message.columns?.slice(0, 10).map((_, colIndex) => (
-                                <td key={colIndex} className="px-3 py-2 border-b">
-                                  {row[colIndex] !== null && row[colIndex] !== undefined 
-                                    ? String(row[colIndex]) 
-                                    : <span className="text-muted-foreground italic">null</span>
-                                  }
-                                </td>
+                  <div className="mt-4">
+                    <Card className="overflow-hidden border-0 shadow-lg bg-white dark:bg-gray-900">
+                      <div className="relative">
+                        {/* Gradient overlay for modern look */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-white via-green-50/30 to-emerald-50/30 dark:from-gray-900 dark:via-green-950/10 dark:to-emerald-950/10 pointer-events-none" />
+                        
+                        <div className="relative p-2 border-b border-green-200 dark:border-green-800 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30">
+                          <div className="flex items-center gap-1.5">
+                            <div className="p-0.5 bg-green-100 dark:bg-green-900/40 rounded">
+                              <Database className="w-3 h-3 text-green-600 dark:text-green-400" />
+                            </div>
+                            <span className="text-xs font-semibold text-green-700 dark:text-green-300">
+                              Query Results ({message.row_count} rows, showing first 10 columns)
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="relative max-h-48 overflow-auto">
+                          <Table className="w-full">
+                            <TableHeader className="sticky top-0 z-10">
+                              <TableRow className="border-b border-green-200 dark:border-green-800 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30">
+                                {message.columns.slice(0, 10).map((column, index) => (
+                                  <TableHead 
+                                    key={index} 
+                                    className="px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 min-w-28"
+                                  >
+                                    <div className="flex items-center gap-1">
+                                      <div className="p-0.5 bg-green-100 dark:bg-green-900/40 rounded">
+                                        <Database className="w-2.5 h-2.5 text-green-600 dark:text-green-400" />
+                                      </div>
+                                      <span className="truncate font-medium text-xs" title={column}>
+                                        {column}
+                                      </span>
+                                    </div>
+                                  </TableHead>
+                                ))}
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {message.data.slice(0, 100).map((row, rowIndex) => (
+                                <TableRow 
+                                  key={rowIndex} 
+                                  className="border-b border-gray-100 dark:border-gray-800 hover:bg-gradient-to-r hover:from-green-50/50 hover:to-emerald-50/50 dark:hover:from-green-950/20 dark:hover:to-emerald-950/20 transition-all duration-200"
+                                >
+                                  {message.columns?.slice(0, 10).map((_, colIndex) => (
+                                    <TableCell 
+                                      key={colIndex} 
+                                      className="px-2 py-1.5 text-xs min-w-28 hover:bg-white/50 dark:hover:bg-gray-800/50 transition-colors duration-200"
+                                    >
+                                      <div className="flex items-center">
+                                        {row[colIndex] !== null && row[colIndex] !== undefined ? (
+                                          <span 
+                                            className="truncate text-gray-700 dark:text-gray-300" 
+                                            title={String(row[colIndex])}
+                                          >
+                                            {String(row[colIndex])}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-400 dark:text-gray-500 italic text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full">
+                                            null
+                                          </span>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
                               ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {(message.row_count || 0) > 100 && (
-                      <div className="text-xs text-muted-foreground mt-2">
-                        Showing first 100 rows of {message.row_count} total results
+                            </TableBody>
+                          </Table>
+                        </div>
                       </div>
-                    )}
+                    </Card>
+                    
                   </div>
                 )}
               </div>
@@ -952,6 +1006,7 @@ export default function TalkData() {
           onSubmit={handleSubmit}
           disabled={isLoading || (!selectedConnectionId && !selectedCsvFileId)}
           placeholder={(!selectedConnectionId && !selectedCsvFileId) ? "Select a database connection or CSV file first..." : "Ask a question about your data..."}
+          onFileUpload={() => setIsUploadDialogOpen(true)}
         />
       </div>
 

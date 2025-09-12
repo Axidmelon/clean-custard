@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -36,7 +36,7 @@ export function AppLayout() {
       <div className="h-screen flex w-full bg-background overflow-hidden">
         <AppSidebar />
         <main className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 p-6 overflow-hidden">
+          <div className="flex-1 p-4 overflow-y-auto">
             <Outlet />
           </div>
         </main>
