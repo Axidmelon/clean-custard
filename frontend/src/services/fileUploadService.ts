@@ -124,17 +124,51 @@ class FileUploadService {
   }
 
   async getUploadedFiles(): Promise<{ success: boolean; files: any[]; count: number }> {
-    const response = await fetch(`${getApiBaseUrl()}/files/list`, {
-      method: 'GET',
-      headers: await this.getAuthHeaders(),
-    });
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/files/list`, {
+        method: 'GET',
+        headers: await this.getAuthHeaders(),
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ detail: 'Failed to get uploaded files' }));
-      throw new Error(errorData.detail || 'Failed to get uploaded files');
+      if (!response.ok) {
+        let errorMessage = 'Failed to get uploaded files';
+        
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If JSON parsing fails, use status text or default message
+          errorMessage = response.statusText || errorMessage;
+        }
+        
+        // Provide more specific error messages based on status code
+        if (response.status === 401) {
+          errorMessage = 'Authentication required. Please log in again.';
+        } else if (response.status === 503) {
+          errorMessage = 'Service temporarily unavailable. Please try again in a moment.';
+        } else if (response.status === 500) {
+          errorMessage = 'Server error occurred. Please try again or contact support.';
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      
+      // Validate response structure
+      if (!data || typeof data.success !== 'boolean') {
+        throw new Error('Invalid response format from server');
+      }
+      
+      return data;
+    } catch (error) {
+      // Re-throw with more context if it's not already an Error object
+      if (error instanceof Error) {
+        throw error;
+      } else {
+        throw new Error(`Network error: ${String(error)}`);
+      }
     }
-
-    return response.json();
   }
 
   async getUploadServiceStatus(): Promise<UploadServiceStatus> {
@@ -147,6 +181,22 @@ class FileUploadService {
     }
 
     return response.json();
+  }
+
+  async getFilesHealthStatus(): Promise<{ service: string; status: string; timestamp: string; checks: any }> {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/files/health`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Health check failed with status ${response.status}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      throw new Error(`Failed to check files service health: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   // Helper method to convert backend file info to frontend UploadedFile format

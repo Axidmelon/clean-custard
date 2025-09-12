@@ -224,44 +224,88 @@ async def list_uploaded_files(
     try:
         logger.info(f"Listing files for user {current_user.id}")
         
-        # Test database connection first
+        # Validate user and organization
+        if not current_user:
+            logger.error("No current user found in request")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required"
+            )
+        
+        if not current_user.id:
+            logger.error("User ID is missing")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid user session"
+            )
+        
+        # Test database connection first with more robust error handling
         try:
             db.execute("SELECT 1")
             logger.debug("Database connection test successful")
         except Exception as db_error:
             logger.error(f"Database connection test failed: {db_error}")
+            # Try to rollback any pending transaction
+            try:
+                db.rollback()
+            except Exception:
+                pass
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Database connection error: {str(db_error)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database connection error. Please try again in a moment."
             )
         
-        uploaded_files = db.query(UploadedFile).filter(
-            UploadedFile.user_id == current_user.id
-        ).order_by(UploadedFile.created_at.desc()).all()
+        # Query uploaded files with better error handling
+        try:
+            uploaded_files = db.query(UploadedFile).filter(
+                UploadedFile.user_id == current_user.id
+            ).order_by(UploadedFile.created_at.desc()).all()
+            
+            logger.info(f"Found {len(uploaded_files)} files for user {current_user.id}")
+            
+        except Exception as query_error:
+            logger.error(f"Database query failed: {query_error}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve files from database"
+            )
         
-        logger.info(f"Found {len(uploaded_files)} files for user {current_user.id}")
-        
+        # Process files data with enhanced error handling
         files_data = []
         for file in uploaded_files:
-            # Safely convert file_size to int, handle potential string issues
             try:
-                file_size = int(file.file_size)
-            except (ValueError, TypeError):
-                # If conversion fails, use 0 as default
-                file_size = 0
-                logger.warning(f"Could not convert file_size to int for file {file.id}: {file.file_size}")
+                # Safely convert file_size to int, handle potential string issues
+                try:
+                    file_size = int(file.file_size) if file.file_size else 0
+                except (ValueError, TypeError):
+                    # If conversion fails, use 0 as default
+                    file_size = 0
+                    logger.warning(f"Could not convert file_size to int for file {file.id}: {file.file_size}")
                 
-            files_data.append({
-                "id": str(file.id),
-                "original_filename": file.original_filename,
-                "file_size": file_size,
-                "file_path": file.file_path,
-                "file_url": file.file_url,
-                "content_type": file.content_type,
-                "cloudinary_public_id": file.cloudinary_public_id,
-                "created_at": file.created_at.isoformat(),
-                "updated_at": file.updated_at.isoformat() if file.updated_at else None
-            })
+                # Safely handle datetime fields
+                created_at = file.created_at.isoformat() if file.created_at else None
+                updated_at = file.updated_at.isoformat() if file.updated_at else None
+                
+                files_data.append({
+                    "id": str(file.id),
+                    "original_filename": file.original_filename or "Unknown",
+                    "file_size": file_size,
+                    "file_path": file.file_path or "",
+                    "file_url": file.file_url or "",
+                    "content_type": file.content_type or "application/octet-stream",
+                    "cloudinary_public_id": file.cloudinary_public_id,
+                    "created_at": created_at,
+                    "updated_at": updated_at
+                })
+                
+            except Exception as file_error:
+                logger.error(f"Error processing file {file.id}: {file_error}")
+                # Continue processing other files instead of failing completely
+                continue
         
         logger.info(f"Successfully processed {len(files_data)} files")
         
@@ -277,9 +321,16 @@ async def list_uploaded_files(
         logger.error(f"Unexpected error retrieving uploaded files: {e}")
         import traceback
         logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        # Try to rollback any pending transaction
+        try:
+            db.rollback()
+        except Exception:
+            pass
+            
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred while retrieving files: {str(e)}"
+            detail="An unexpected error occurred while retrieving files. Please try again."
         )
 
 @router.get("/status")
@@ -292,6 +343,57 @@ async def get_upload_service_status():
         "cloud_name": cloudinary_upload_service.cloud_name,
         "configured": cloudinary_upload_service.configured
     }
+
+@router.get("/health")
+async def files_health_check(db: Session = Depends(get_db)):
+    """
+    Health check endpoint for the files service
+    """
+    health_status = {
+        "service": "files",
+        "status": "healthy",
+        "timestamp": None,
+        "checks": {}
+    }
+    
+    try:
+        from datetime import datetime
+        health_status["timestamp"] = datetime.utcnow().isoformat()
+        
+        # Check database connection
+        try:
+            db.execute("SELECT 1")
+            health_status["checks"]["database"] = {"status": "healthy", "message": "Database connection successful"}
+        except Exception as e:
+            health_status["checks"]["database"] = {"status": "unhealthy", "message": f"Database error: {str(e)}"}
+            health_status["status"] = "unhealthy"
+        
+        # Check Cloudinary service
+        try:
+            cloudinary_available = cloudinary_upload_service.is_available()
+            if cloudinary_available:
+                health_status["checks"]["cloudinary"] = {"status": "healthy", "message": "Cloudinary service available"}
+            else:
+                health_status["checks"]["cloudinary"] = {"status": "unhealthy", "message": "Cloudinary service unavailable"}
+                health_status["status"] = "unhealthy"
+        except Exception as e:
+            health_status["checks"]["cloudinary"] = {"status": "unhealthy", "message": f"Cloudinary error: {str(e)}"}
+            health_status["status"] = "unhealthy"
+        
+        # Check if we can query uploaded files table
+        try:
+            file_count = db.query(UploadedFile).count()
+            health_status["checks"]["files_table"] = {"status": "healthy", "message": f"Files table accessible, {file_count} files"}
+        except Exception as e:
+            health_status["checks"]["files_table"] = {"status": "unhealthy", "message": f"Files table error: {str(e)}"}
+            health_status["status"] = "unhealthy"
+        
+        return health_status
+        
+    except Exception as e:
+        health_status["status"] = "unhealthy"
+        health_status["checks"]["general"] = {"status": "unhealthy", "message": f"General error: {str(e)}"}
+        return health_status
 
 @router.get("/signed-url/{file_id}")
 async def get_signed_url(
