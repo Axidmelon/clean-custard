@@ -18,11 +18,11 @@ SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 if not SQLALCHEMY_DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 
-# Database connection pool settings
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "20"))
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "30"))
-DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
-DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))
+# Database connection pool settings - optimized for Supabase free tier
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))  # Reduced from 20 to 5
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))  # Reduced from 30 to 10
+DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "10"))  # Reduced from 30 to 10
+DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # Reduced from 3600 to 1800 (30 min)
 DB_POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
 
 # Create engine with connection pooling
@@ -30,7 +30,10 @@ connect_args = {}
 if "postgresql" in SQLALCHEMY_DATABASE_URL:
     connect_args.update({
         "sslmode": "require",
-        "options": "-c default_transaction_isolation=read_committed"
+        "options": "-c default_transaction_isolation=read_committed",
+        "application_name": "custard-backend",
+        "connect_timeout": 10,
+        "command_timeout": 30,
     })
 
 engine = create_engine(
@@ -43,9 +46,11 @@ engine = create_engine(
     pool_pre_ping=DB_POOL_PRE_PING,  # Verify connections before use
     echo=os.getenv("DEBUG", "false").lower() == "true",
     connect_args=connect_args,
-    # Production optimizations
+    # Production optimizations for Supabase
     pool_reset_on_return="commit",
     isolation_level="READ_COMMITTED",
+    # Additional Supabase optimizations
+    pool_events=True,
 )
 
 # A SessionLocal class is a factory for creating new database sessions.
