@@ -35,6 +35,11 @@ if "postgresql" in SQLALCHEMY_DATABASE_URL:
         "connect_timeout": 30,  # Increased from 10 to 30 seconds
     })
 
+# Set isolation level based on database type
+isolation_level = "READ_COMMITTED"
+if "sqlite" in SQLALCHEMY_DATABASE_URL:
+    isolation_level = "SERIALIZABLE"  # SQLite doesn't support READ_COMMITTED
+
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     poolclass=QueuePool,
@@ -45,9 +50,9 @@ engine = create_engine(
     pool_pre_ping=DB_POOL_PRE_PING,  # Verify connections before use
     echo=os.getenv("DEBUG", "false").lower() == "true",
     connect_args=connect_args,
-    # Production optimizations for Supabase
+    # Production optimizations
     pool_reset_on_return="commit",
-    isolation_level="READ_COMMITTED",
+    isolation_level=isolation_level,
 )
 
 # A SessionLocal class is a factory for creating new database sessions.

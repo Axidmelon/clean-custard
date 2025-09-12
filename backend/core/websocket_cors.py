@@ -17,8 +17,8 @@ class WebSocketCORSValidator:
     """
     
     def __init__(self):
-        # Use cors_origins if available, otherwise fall back to allowed_origins
-        self.allowed_origins = settings.cors_origins if settings.cors_origins else settings.allowed_origins
+        # Use allowed_origins from settings
+        self.allowed_origins = settings.allowed_origins
         self.environment = settings.environment
         self._setup_environment_specific_origins()
     
