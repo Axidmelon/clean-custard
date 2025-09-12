@@ -58,7 +58,7 @@ class WebSocketCORSValidator:
         """
         if not origin:
             # Allow connections without origin header (e.g., from agents, mobile apps)
-            logger.debug("WebSocket connection without origin header - allowing")
+            # Removed debug logging to reduce Railway log rate limit issues
             return True
         
         # Check exact match first
@@ -145,5 +145,5 @@ async def validate_websocket_cors(websocket, endpoint_name: str = "websocket") -
         await websocket.close(code=1008, reason="Origin not allowed")
         return False
     
-    logger.debug(f"{endpoint_name} connection allowed for origin: {origin}")
+    # Removed debug logging to reduce Railway log rate limit issues
     return True

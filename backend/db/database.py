@@ -77,10 +77,12 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
 @event.listens_for(engine, "checkout")
 def receive_checkout(dbapi_connection, connection_record, connection_proxy):
     """Log database connection checkout."""
-    logger.debug("Database connection checked out")
+    # Removed debug logging to reduce Railway log rate limit issues
+    pass
 
 
 @event.listens_for(engine, "checkin")
 def receive_checkin(dbapi_connection, connection_record):
     """Log database connection checkin."""
-    logger.debug("Database connection checked in")
+    # Removed debug logging to reduce Railway log rate limit issues
+    pass

@@ -32,7 +32,7 @@ def setup_logging():
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     
     if settings.environment == "production":
-        # Production logging configuration
+        # Production logging configuration - optimized for Railway rate limits
         logging.basicConfig(
             level=getattr(logging, settings.log_level),
             format=log_format,
@@ -42,11 +42,16 @@ def setup_logging():
             ]
         )
         
-        # Reduce noise from third-party libraries
+        # Reduce noise from third-party libraries and frequent operations
         logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-        logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+        logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
         logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
         logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+        logging.getLogger("sqlalchemy.dialects").setLevel(logging.WARNING)
+        logging.getLogger("sqlalchemy.orm").setLevel(logging.WARNING)
+        logging.getLogger("websockets").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
     else:
         # Development logging configuration
         logging.basicConfig(
