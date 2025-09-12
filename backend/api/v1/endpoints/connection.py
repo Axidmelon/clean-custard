@@ -266,42 +266,6 @@ async def refresh_schema(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/{connection_id}/status", response_model=dict)
-def get_connection_status(
-    connection_id: uuid.UUID, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user())
-):
-    """
-    Get the connection status including agent connectivity.
-
-    Args:
-        connection_id: UUID of the connection
-        db: Database session
-        current_user: Authenticated user
-
-    Returns:
-        Connection status information
-    """
-    # Get the connection from database to find its agent_id, ensuring user has access
-    connection = db.query(models.Connection).filter(
-        models.Connection.id == connection_id,
-        models.Connection.organization_id == current_user.organization_id
-    ).first()
-
-    if not connection:
-        raise HTTPException(status_code=404, detail="Connection not found")
-
-    # Use the agent_id from the database
-    agent_id = connection.agent_id
-    is_connected = manager.is_agent_connected(agent_id) if agent_id else False
-
-    return {
-        "connection_id": str(connection_id),
-        "agent_id": agent_id,
-        "agent_connected": is_connected,
-        "status": "active" if is_connected else "disconnected",
-    }
 
 
 @router.delete("/{connection_id}", status_code=204)

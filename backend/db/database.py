@@ -19,10 +19,10 @@ if not SQLALCHEMY_DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 
 # Database connection pool settings - optimized for Supabase Nano tier
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "15"))  # Match Supabase pool size
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))  # Additional connections
-DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "10"))  # Reduced from 30 to 10
-DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # Reduced from 3600 to 1800 (30 min)
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))  # Reduced from 15 to 10 for Supabase Nano
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))  # Reduced from 10 to 5
+DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))  # Increased from 10 to 30 for better reliability
+DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # 30 minutes
 DB_POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
 
 # Create engine with connection pooling
@@ -32,7 +32,9 @@ if "postgresql" in SQLALCHEMY_DATABASE_URL:
         "sslmode": "require",
         "options": "-c default_transaction_isolation=read_committed",
         "application_name": "custard-backend",
-        "connect_timeout": 10,
+        "connect_timeout": 30,  # Increased from 10 to 30 seconds
+        "command_timeout": 60,  # Add command timeout
+        "server_side_cursors": False,  # Disable server-side cursors for better compatibility
     })
 
 engine = create_engine(

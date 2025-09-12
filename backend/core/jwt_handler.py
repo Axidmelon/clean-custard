@@ -84,11 +84,15 @@ def get_current_user():
     from fastapi.security import HTTPBearer
     from services import user_services as user_service
     from db.dependencies import get_db
+    from sqlalchemy.orm import Session
     
     # Create OAuth2 scheme
     oauth2_scheme = HTTPBearer()
     
-    def _get_current_user(credentials = Depends(oauth2_scheme)):
+    def _get_current_user(
+        credentials = Depends(oauth2_scheme),
+        db: Session = Depends(get_db)
+    ):
         try:
             # Extract token from credentials
             token = credentials.credentials
@@ -103,20 +107,12 @@ def get_current_user():
             if not user_id:
                 raise HTTPException(status_code=401, detail="Invalid token payload")
             
-            # Get database session
-            db_gen = get_db()
-            db = next(db_gen)
+            # Get user from database using the injected session
+            user = user_service.get_user_by_id(db, user_id)
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
             
-            try:
-                # Get user from database
-                user = user_service.get_user_by_id(db, user_id)
-                if not user:
-                    raise HTTPException(status_code=404, detail="User not found")
-                
-                return user
-                
-            finally:
-                db.close()
+            return user
                 
         except HTTPException:
             raise
