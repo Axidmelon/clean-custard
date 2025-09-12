@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { getApiBaseUrl } from '@/lib/constants';
 
 export interface SignedUrlResponse {
   success: boolean;
@@ -52,7 +52,7 @@ class SignedUrlService {
 
     // Fetch new signed URL from backend
     console.log('Fetching new signed URL for file:', fileId);
-    const response = await fetch(`${API_BASE_URL}/api/v1/files/signed-url/${fileId}?expiration_hours=${expirationHours}`, {
+    const response = await fetch(`${getApiBaseUrl()}/files/signed-url/${fileId}?expiration_hours=${expirationHours}`, {
       method: 'GET',
       headers: await this.getAuthHeaders(),
     });

@@ -1,6 +1,5 @@
 import { UploadedFile } from '@/contexts/FileUploadContext';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { getApiBaseUrl } from '@/lib/constants';
 
 export interface FileUploadResponse {
   success: boolean;
@@ -62,7 +61,7 @@ class FileUploadService {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${API_BASE_URL}/api/v1/files/upload`, {
+    const response = await fetch(`${getApiBaseUrl()}/files/upload`, {
       method: 'POST',
       headers: await this.getAuthHeaders(),
       body: formData,
@@ -82,7 +81,7 @@ class FileUploadService {
       formData.append('files', file);
     });
 
-    const response = await fetch(`${API_BASE_URL}/api/v1/files/upload-multiple`, {
+    const response = await fetch(`${getApiBaseUrl()}/files/upload-multiple`, {
       method: 'POST',
       headers: await this.getAuthHeaders(),
       body: formData,
@@ -97,7 +96,7 @@ class FileUploadService {
   }
 
   async deleteFile(fileId: string): Promise<FileDeleteResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/files/delete/${encodeURIComponent(fileId)}`, {
+    const response = await fetch(`${getApiBaseUrl()}/files/delete/${encodeURIComponent(fileId)}`, {
       method: 'DELETE',
       headers: await this.getAuthHeaders(),
     });
@@ -111,7 +110,7 @@ class FileUploadService {
   }
 
   async getFileInfo(filePath: string): Promise<FileInfoResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/files/info/${encodeURIComponent(filePath)}`, {
+    const response = await fetch(`${getApiBaseUrl()}/files/info/${encodeURIComponent(filePath)}`, {
       method: 'GET',
       headers: await this.getAuthHeaders(),
     });
@@ -125,7 +124,7 @@ class FileUploadService {
   }
 
   async getUploadedFiles(): Promise<{ success: boolean; files: any[]; count: number }> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/files/list`, {
+    const response = await fetch(`${getApiBaseUrl()}/files/list`, {
       method: 'GET',
       headers: await this.getAuthHeaders(),
     });
@@ -139,7 +138,7 @@ class FileUploadService {
   }
 
   async getUploadServiceStatus(): Promise<UploadServiceStatus> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/files/status`, {
+    const response = await fetch(`${getApiBaseUrl()}/files/status`, {
       method: 'GET',
     });
 
