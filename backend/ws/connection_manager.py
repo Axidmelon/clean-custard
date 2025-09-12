@@ -285,6 +285,12 @@ class ConnectionManager:
             logger.warning(f"Agent '{agent_id}' disconnected before schema refresh could start")
             return
         
+        # Verify WebSocket connection is healthy before proceeding
+        websocket = self.active_connections.get(agent_id)
+        if not websocket:
+            logger.warning(f"No WebSocket connection found for agent '{agent_id}' during schema refresh")
+            return
+        
         # Import here to avoid circular imports
         from db.dependencies import get_db
         from db.models import Connection
@@ -319,8 +325,13 @@ class ConnectionManager:
             logger.info(f"Sending schema discovery command: {command}")
             
             # Send command to the agent and wait for a response
-            # Use a reasonable timeout for schema discovery (agent responds in ~3 seconds, but allow buffer)
-            response = await self.send_query_to_agent(command, agent_id, timeout=15)
+            # Use a longer timeout for schema discovery (PostgreSQL can take 20-30 seconds for complex schemas)
+            # Check connection health before sending
+            if not self.is_agent_connected(agent_id):
+                logger.warning(f"Agent '{agent_id}' disconnected before schema discovery command could be sent")
+                return
+            
+            response = await self.send_query_to_agent(command, agent_id, timeout=30)
             
             logger.info(f"Schema discovery response received: {response}")
             
@@ -793,6 +804,8 @@ class ConnectionManager:
             
             if success:
                 logger.info(f"Successfully processed late schema response for agent '{agent_id}'")
+                # Ensure agent status is properly broadcasted after successful late response processing
+                await self._broadcast_agent_status_update(agent_id, True)
             else:
                 logger.error(f"Failed to process late schema response for agent '{agent_id}'")
                 

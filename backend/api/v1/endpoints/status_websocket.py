@@ -70,6 +70,17 @@ async def send_all_agent_status(websocket: WebSocket):
             
         logger.info(f"Successfully sent initial status for {len(connected_agents)} agents")
         
+        # If no agents are connected, send a status update indicating this
+        if len(connected_agents) == 0:
+            logger.info("No agents currently connected - sending empty status")
+            empty_message = {
+                "type": "AGENT_STATUS_UPDATE",
+                "agent_id": "system",
+                "agentConnected": False,
+                "message": "No agents currently connected"
+            }
+            await websocket.send_text(json.dumps(empty_message))
+        
     except Exception as e:
         logger.error(f"Error sending initial agent status: {e}")
 
