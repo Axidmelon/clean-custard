@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import redis
 from typing import Optional, Dict, Any, Union
 from datetime import datetime, timedelta, timezone
@@ -31,7 +32,7 @@ class RedisService:
         """Establish connection to Redis with fallback handling."""
         try:
             # Use Redis URL from environment or default to localhost
-            redis_url = getattr(settings, 'redis_url', 'redis://localhost:6379/0')
+            redis_url = os.getenv('REDIS_URL') or getattr(settings, 'redis_url', 'redis://localhost:6379/0')
             
             # Parse Redis URL for connection parameters
             if redis_url.startswith('redis://'):

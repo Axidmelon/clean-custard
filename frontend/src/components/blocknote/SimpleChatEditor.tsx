@@ -6,6 +6,7 @@ interface SimpleChatEditorProps {
   disabled?: boolean;
   placeholder?: string;
   onFileUpload?: () => void;
+  allowFileUploadWhenDisabled?: boolean;
 }
 
 export const SimpleChatEditor: React.FC<SimpleChatEditorProps> = ({
@@ -13,6 +14,7 @@ export const SimpleChatEditor: React.FC<SimpleChatEditorProps> = ({
   disabled = false,
   placeholder = "Connect data and start chatting!",
   onFileUpload,
+  allowFileUploadWhenDisabled = true,
 }) => {
   const [input, setInput] = useState("");
 
@@ -38,11 +40,23 @@ export const SimpleChatEditor: React.FC<SimpleChatEditorProps> = ({
         {/* Plus Button */}
         <button
           type="button"
-          onClick={onFileUpload}
-          className="flex items-center justify-center w-10 h-10 m-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-200 group"
-          disabled={disabled}
+          onClick={() => {
+            console.log('Plus button clicked!');
+            onFileUpload?.();
+          }}
+          className={`flex items-center justify-center w-10 h-10 m-2 rounded-xl transition-all duration-200 group ${
+            disabled && !allowFileUploadWhenDisabled
+              ? 'bg-gray-50 dark:bg-gray-800 cursor-not-allowed opacity-50'
+              : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 hover:scale-105 cursor-pointer'
+          }`}
+          disabled={disabled && !allowFileUploadWhenDisabled}
+          title="Upload CSV file"
         >
-          <Plus className="w-5 h-5 text-gray-600 dark:text-gray-400 group-hover:text-gray-800 dark:group-hover:text-gray-200 transition-colors" />
+          <Plus className={`w-5 h-5 transition-colors ${
+            disabled && !allowFileUploadWhenDisabled
+              ? 'text-gray-400 dark:text-gray-500'
+              : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-800 dark:group-hover:text-gray-200'
+          }`} />
         </button>
 
         {/* Input Field */}

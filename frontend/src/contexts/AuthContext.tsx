@@ -14,26 +14,47 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const initializeAuth = async () => {
       try {
         const storedToken = getStoredToken();
-        const storedUser = localStorage.getItem('user');
+        let storedUser = null;
+        
+        // Safely get user data from localStorage
+        try {
+          const userData = localStorage.getItem('user');
+          if (userData) {
+            storedUser = JSON.parse(userData);
+          }
+        } catch (storageError) {
+          logError('Failed to read user data from localStorage', storageError);
+          // Continue without user data - token validation will handle auth
+        }
         
         if (storedToken && storedUser) {
-          const parsedUser = JSON.parse(storedUser);
-          
           // Verify token is still valid
           if (!isTokenExpired(storedToken)) {
             setToken(storedToken);
-            setUser(parsedUser);
+            setUser(storedUser);
             logDebug('User authenticated from stored token');
           } else {
             logDebug('Stored token expired, clearing auth data');
             clearStoredToken();
-            localStorage.removeItem('user');
+            try {
+              localStorage.removeItem('user');
+            } catch (storageError) {
+              logError('Failed to clear user data from localStorage', storageError);
+            }
           }
+        } else if (storedToken && !storedUser) {
+          // Token exists but no user data - this shouldn't happen normally
+          logDebug('Token found but no user data, clearing token');
+          clearStoredToken();
         }
       } catch (error) {
         logError('Failed to initialize auth', error);
         clearStoredToken();
-        localStorage.removeItem('user');
+        try {
+          localStorage.removeItem('user');
+        } catch (storageError) {
+          logError('Failed to clear user data from localStorage', storageError);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -47,7 +68,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(userData);
       setToken(authToken);
       storeToken(authToken);
-      localStorage.setItem('user', JSON.stringify(userData));
+      
+      // Safely store user data
+      try {
+        localStorage.setItem('user', JSON.stringify(userData));
+      } catch (storageError) {
+        logError('Failed to store user data in localStorage', storageError);
+        // Don't throw - token storage succeeded, user can still be logged in
+      }
+      
       logDebug('User logged in successfully', { userId: userData.id });
     } catch (error) {
       logError('Failed to store token during login', error);
@@ -59,7 +88,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(null);
     setToken(null);
     clearStoredToken();
-    localStorage.removeItem('user');
+    
+    // Safely clear user data
+    try {
+      localStorage.removeItem('user');
+    } catch (storageError) {
+      logError('Failed to clear user data from localStorage', storageError);
+    }
+    
     logDebug('User logged out');
   };
 
@@ -67,7 +103,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (user) {
       const updatedUser = { ...user, ...userData };
       setUser(updatedUser);
-      localStorage.setItem('user', JSON.stringify(updatedUser));
+      
+      // Safely update user data in localStorage
+      try {
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      } catch (storageError) {
+        logError('Failed to update user data in localStorage', storageError);
+        // Don't throw - state update succeeded
+      }
+      
       logDebug('User data updated', { userId: user.id });
     }
   };

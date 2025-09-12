@@ -735,7 +735,7 @@ export default function TalkData() {
                 Select a data source
               </h3>
               <p className="text-sm text-muted-foreground max-w-md">
-                Please select either a database connection or an uploaded CSV file above to start asking questions about your data.
+                Please select either a database connection or an uploaded CSV file above to analyse your data.
               </p>
             </div>
           </div>
@@ -1005,8 +1005,9 @@ export default function TalkData() {
         <SimpleChatEditor
           onSubmit={handleSubmit}
           disabled={isLoading || (!selectedConnectionId && !selectedCsvFileId)}
-          placeholder={(!selectedConnectionId && !selectedCsvFileId) ? "Select a database connection or CSV file first..." : "Ask a question about your data..."}
+          placeholder={(!selectedConnectionId && !selectedCsvFileId) ? "Select a database connection or CSV file first..." : "Ask a question to analyse your data..."}
           onFileUpload={() => setIsUploadDialogOpen(true)}
+          allowFileUploadWhenDisabled={true}
         />
       </div>
 

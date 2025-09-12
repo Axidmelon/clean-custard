@@ -1,5 +1,6 @@
 # File: backend/core/rate_limiter.py
 
+import os
 import time
 import logging
 from typing import Optional
@@ -90,7 +91,8 @@ def check_rate_limit_redis(client_ip: str, endpoint: str) -> bool:
         import redis
 
         # Connect to Redis
-        redis_client = redis.from_url(settings.rate_limit_redis_url)
+        redis_url = os.getenv('REDIS_URL') or settings.rate_limit_redis_url
+        redis_client = redis.from_url(redis_url)
 
         if endpoint not in RATE_LIMITS:
             return True
@@ -151,7 +153,7 @@ def check_rate_limit(request: Request, endpoint: str) -> None:
     client_ip = get_client_ip(request)
 
     # Check rate limit
-    if settings.rate_limit_redis_url:
+    if os.getenv('REDIS_URL') or settings.rate_limit_redis_url:
         allowed = check_rate_limit_redis(client_ip, endpoint)
     else:
         allowed = check_rate_limit_memory(client_ip, endpoint)
@@ -184,11 +186,12 @@ def get_rate_limit_info(client_ip: str, endpoint: str) -> dict:
 
     limit_config = RATE_LIMITS[endpoint]
 
-    if settings.rate_limit_redis_url:
+    if os.getenv('REDIS_URL') or settings.rate_limit_redis_url:
         try:
             import redis
 
-            redis_client = redis.from_url(settings.rate_limit_redis_url)
+            redis_url = os.getenv('REDIS_URL') or settings.rate_limit_redis_url
+            redis_client = redis.from_url(redis_url)
             redis_key = f"rate_limit:{endpoint}:{client_ip}"
             current_count = redis_client.zcard(redis_key)
         except Exception:

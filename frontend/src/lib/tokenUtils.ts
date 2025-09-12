@@ -78,10 +78,29 @@ export const getTimeUntilExpiration = (token: string): number => {
 };
 
 /**
+ * Check if localStorage is available and accessible
+ */
+const isLocalStorageAvailable = (): boolean => {
+  try {
+    const testKey = '__localStorage_test__';
+    localStorage.setItem(testKey, 'test');
+    localStorage.removeItem(testKey);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Store token securely with metadata
  */
 export const storeToken = (token: string): void => {
   try {
+    if (!isLocalStorageAvailable()) {
+      logError('localStorage not available', new Error('localStorage access denied'));
+      throw new Error('localStorage not available');
+    }
+
     const decoded = decodeToken(token);
     if (!decoded) {
       throw new Error('Invalid token format');
@@ -111,6 +130,11 @@ export const storeToken = (token: string): void => {
  */
 export const getStoredToken = (): string | null => {
   try {
+    if (!isLocalStorageAvailable()) {
+      logError('localStorage not available', new Error('localStorage access denied'));
+      return null;
+    }
+
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) return null;
     
@@ -132,6 +156,11 @@ export const getStoredToken = (): string | null => {
  */
 export const getStoredTokenData = (): TokenData | null => {
   try {
+    if (!isLocalStorageAvailable()) {
+      logError('localStorage not available', new Error('localStorage access denied'));
+      return null;
+    }
+
     const tokenDataStr = localStorage.getItem(TOKEN_DATA_KEY);
     if (!tokenDataStr) return null;
     
@@ -155,6 +184,11 @@ export const getStoredTokenData = (): TokenData | null => {
  */
 export const clearStoredToken = (): void => {
   try {
+    if (!isLocalStorageAvailable()) {
+      logError('localStorage not available', new Error('localStorage access denied'));
+      return;
+    }
+
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(TOKEN_DATA_KEY);
     logDebug('Token cleared from storage');

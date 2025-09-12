@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     rate_limit_redis_url: Optional[str] = None
     
     # Redis Configuration
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://localhost:6379/0"  # Default fallback
     redis_enabled: bool = True
 
     # Backup & Recovery
