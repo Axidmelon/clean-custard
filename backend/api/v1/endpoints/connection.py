@@ -20,6 +20,14 @@ class RefreshSchemaRequest(BaseModel):
     agent_id: str
 
 
+class ConnectionStatusResponse(BaseModel):
+    connection_id: str
+    agent_connected: bool
+    agent_id: str
+    last_activity: float = None
+    connection_metadata: dict = None
+
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -329,3 +337,53 @@ def delete_connection(
         db.rollback()
         logger.error(f"Failed to delete connection {connection_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete connection")
+
+
+@router.get("/{connection_id}/status", response_model=ConnectionStatusResponse)
+def get_connection_status(
+    connection_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user())
+):
+    """
+    Get the connection status including agent connectivity.
+
+    Args:
+        connection_id: Connection UUID
+        db: Database session
+        current_user: Authenticated user
+
+    Returns:
+        Connection status information
+
+    Raises:
+        HTTPException: If connection not found or user doesn't have access
+    """
+    try:
+        connection_uuid = uuid.UUID(connection_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid connection ID format")
+    
+    connection = db.query(models.Connection).filter(
+        models.Connection.id == connection_uuid,
+        models.Connection.organization_id == current_user.organization_id
+    ).first()
+
+    if not connection:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    # Check if agent is connected
+    agent_connected = False
+    connection_metadata = None
+    
+    if connection.agent_id:
+        agent_connected = manager.is_agent_connected(connection.agent_id)
+        connection_metadata = manager.get_connection_info(connection.agent_id)
+
+    return ConnectionStatusResponse(
+        connection_id=connection_id,
+        agent_connected=agent_connected,
+        agent_id=connection.agent_id or "",
+        last_activity=connection_metadata.get("last_activity") if connection_metadata else None,
+        connection_metadata=connection_metadata or {}
+    )

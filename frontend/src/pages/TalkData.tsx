@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Database } from "lucide-react";
+import { Send, Bot, User, Database, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -15,9 +15,11 @@ interface Message {
   content: string;
   code?: string;
   error?: string;
+  error_type?: 'agent_disconnected' | 'query_failed' | 'network_error' | 'unknown';
   data?: any[];
   columns?: string[];
   row_count?: number;
+  can_retry?: boolean;
 }
 
 export default function TalkData() {
@@ -25,6 +27,7 @@ export default function TalkData() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
+  const [agentStatus, setAgentStatus] = useState<{ [connectionId: string]: boolean }>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   
@@ -39,7 +42,35 @@ export default function TalkData() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Check agent status when connection is selected
+  useEffect(() => {
+    if (selectedConnectionId && connections) {
+      checkAgentStatus(selectedConnectionId);
+    }
+  }, [selectedConnectionId, connections]);
+
+  const checkAgentStatus = async (connectionId: string) => {
+    try {
+      // This would need to be implemented in your API
+      // For now, we'll update status based on query results
+      const response = await fetch(`/api/v1/connections/${connectionId}/status`);
+      if (response.ok) {
+        const data = await response.json();
+        setAgentStatus(prev => ({
+          ...prev,
+          [connectionId]: data.agent_connected
+        }));
+      }
+    } catch (error) {
+      // If status check fails, assume agent is disconnected
+      setAgentStatus(prev => ({
+        ...prev,
+        [connectionId]: false
+      }));
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent, retryMessageId?: string) => {
     e.preventDefault();
     if (!input.trim() || isLoading || !selectedConnectionId) return;
 
@@ -49,8 +80,10 @@ export default function TalkData() {
       content: input.trim()
     };
 
-    setMessages(prev => [...prev, userMessage]);
-    setInput("");
+    if (!retryMessageId) {
+      setMessages(prev => [...prev, userMessage]);
+      setInput("");
+    }
     setIsLoading(true);
 
     try {
@@ -62,8 +95,14 @@ export default function TalkData() {
 
       const response: QueryResponse = await queryService.askQuestion(queryRequest);
       
+      // Mark agent as connected on successful query
+      setAgentStatus(prev => ({
+        ...prev,
+        [selectedConnectionId]: true
+      }));
+      
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: retryMessageId || (Date.now() + 1).toString(),
         type: 'assistant',
         content: response.answer,
         code: response.sql_query,
@@ -72,19 +111,88 @@ export default function TalkData() {
         row_count: response.row_count
       };
       
-      setMessages(prev => [...prev, assistantMessage]);
+      if (retryMessageId) {
+        // Update existing error message
+        setMessages(prev => prev.map(msg => 
+          msg.id === retryMessageId ? assistantMessage : msg
+        ));
+      } else {
+        setMessages(prev => [...prev, assistantMessage]);
+      }
     } catch (error) {
+      const errorType = getErrorType(error);
+      const errorContent = getErrorMessage(error, errorType);
+      
+      // Update agent status based on error type
+      if (errorType === 'agent_disconnected') {
+        setAgentStatus(prev => ({
+          ...prev,
+          [selectedConnectionId]: false
+        }));
+      }
+      
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: retryMessageId || (Date.now() + 1).toString(),
         type: 'assistant',
-        content: `Sorry, I encountered an error while processing your question: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        content: errorContent,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        error_type: errorType,
+        can_retry: errorType === 'agent_disconnected' || errorType === 'network_error'
       };
       
-      setMessages(prev => [...prev, errorMessage]);
+      if (retryMessageId) {
+        // Update existing message
+        setMessages(prev => prev.map(msg => 
+          msg.id === retryMessageId ? errorMessage : msg
+        ));
+      } else {
+        setMessages(prev => [...prev, errorMessage]);
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getErrorType = (error: any): 'agent_disconnected' | 'query_failed' | 'network_error' | 'unknown' => {
+    if (!error) return 'unknown';
+    
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorString = errorMessage.toLowerCase();
+    
+    if (errorString.includes('503') || errorString.includes('not connected') || errorString.includes('agent')) {
+      return 'agent_disconnected';
+    }
+    if (errorString.includes('network') || errorString.includes('fetch') || errorString.includes('connection')) {
+      return 'network_error';
+    }
+    if (errorString.includes('query') || errorString.includes('sql')) {
+      return 'query_failed';
+    }
+    return 'unknown';
+  };
+
+  const getErrorMessage = (error: any, errorType: string): string => {
+    const baseMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    switch (errorType) {
+      case 'agent_disconnected':
+        return `The database agent is currently disconnected. Please wait a moment and try again. The agent should reconnect automatically.`;
+      case 'network_error':
+        return `Network connection issue. Please check your internet connection and try again.`;
+      case 'query_failed':
+        return `Query execution failed: ${baseMessage}`;
+      default:
+        return `Sorry, I encountered an error while processing your question: ${baseMessage}`;
+    }
+  };
+
+  const handleRetry = (messageId: string, originalQuestion: string) => {
+    setInput(originalQuestion);
+    // Create a synthetic form event for retry
+    const syntheticEvent = {
+      preventDefault: () => {}
+    } as React.FormEvent;
+    handleSubmit(syntheticEvent, messageId);
   };
 
   return (
@@ -108,7 +216,14 @@ export default function TalkData() {
               ) : connections && connections.length > 0 ? (
                 connections.map((connection) => (
                   <SelectItem key={connection.id} value={connection.id}>
-                    {connection.name} ({connection.db_type})
+                    <div className="flex items-center gap-2">
+                      <span>{connection.name} ({connection.db_type})</span>
+                      {agentStatus[connection.id] !== undefined && (
+                        <div className={`w-2 h-2 rounded-full ${
+                          agentStatus[connection.id] ? 'bg-green-500' : 'bg-red-500'
+                        }`} title={agentStatus[connection.id] ? 'Agent Connected' : 'Agent Disconnected'} />
+                      )}
+                    </div>
                   </SelectItem>
                 ))
               ) : (
@@ -116,6 +231,18 @@ export default function TalkData() {
               )}
             </SelectContent>
           </Select>
+          
+          {/* Agent Status Indicator */}
+          {selectedConnectionId && agentStatus[selectedConnectionId] !== undefined && (
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted">
+              <div className={`w-2 h-2 rounded-full ${
+                agentStatus[selectedConnectionId] ? 'bg-green-500' : 'bg-red-500'
+              }`} />
+              <span className="text-xs text-muted-foreground">
+                {agentStatus[selectedConnectionId] ? 'Agent Online' : 'Agent Offline'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -162,6 +289,28 @@ export default function TalkData() {
                   {message.content}
                 </p>
                 
+                {message.error && message.can_retry && (
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        // Find the original user question for this error
+                        const messageIndex = messages.findIndex(m => m.id === message.id);
+                        const originalQuestion = messageIndex > 0 ? messages[messageIndex - 1]?.content : '';
+                        if (originalQuestion && originalQuestion !== message.content) {
+                          handleRetry(message.id, originalQuestion);
+                        }
+                      }}
+                      className="text-xs"
+                      disabled={isLoading}
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" />
+                      Retry Query
+                    </Button>
+                  </div>
+                )}
+                
                 {message.code && (
                   <div className="mt-3 p-3 bg-muted rounded-md border">
                     <pre className="text-xs font-mono text-muted-foreground overflow-x-auto">
@@ -189,7 +338,7 @@ export default function TalkData() {
                         <tbody>
                           {message.data.slice(0, 100).map((row, rowIndex) => (
                             <tr key={rowIndex} className="hover:bg-muted/20">
-                              {message.columns?.slice(0, 10).map((column, colIndex) => (
+                              {message.columns?.slice(0, 10).map((_, colIndex) => (
                                 <td key={colIndex} className="px-3 py-2 border-b">
                                   {row[colIndex] !== null && row[colIndex] !== undefined 
                                     ? String(row[colIndex]) 

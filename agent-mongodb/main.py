@@ -370,6 +370,15 @@ class CustardMongoAgent:
         self.agent_id = AGENT_ID  # Agent ID for WebSocket routing
         self.backend_url = BACKEND_WS_URL
         self.running = False
+        self.websocket = None
+        self.heartbeat_task = None
+        self.connection_retry_count = 0
+        self.max_retry_count = 10
+        self.retry_delay = 5  # Start with 5 seconds
+        self.last_heartbeat = time.time()
+
+        # Initialize schema discoverer
+        self.schema_discoverer = MongoSchemaDiscoverer(MONGODB_CONFIG)
 
         # Command handlers
         self.handlers = {
@@ -380,7 +389,7 @@ class CustardMongoAgent:
 
     async def connect_to_backend(self) -> Optional[websockets.WebSocketServerProtocol]:
         """
-        Establish connection to the backend.
+        Establish connection to the backend with exponential backoff retry.
 
         Returns:
             WebSocket connection or None if failed
@@ -389,12 +398,72 @@ class CustardMongoAgent:
             # Use agent_id for WebSocket URL routing
             websocket_url = self.backend_url.replace("{agent_id}", self.agent_id)
             logger.info(f"Connecting to backend at: {websocket_url}")
-            websocket = await websockets.connect(websocket_url)
+            
+            # Set connection options for better stability
+            websocket = await websockets.connect(
+                websocket_url,
+                ping_interval=20,  # Send ping every 20 seconds
+                ping_timeout=10,   # Wait 10 seconds for pong
+                close_timeout=10,  # Wait 10 seconds for close
+                max_size=2**20,    # 1MB max message size
+                max_queue=2**5     # 32 message queue size
+            )
+            
+            self.websocket = websocket
+            self.connection_retry_count = 0
+            self.last_heartbeat = time.time()
+            
             logger.info(f"✅ Successfully connected to Custard backend as MongoDB agent: {self.agent_id}")
             return websocket
         except Exception as e:
-            logger.error(f"Failed to connect to backend: {e}")
+            self.connection_retry_count += 1
+            logger.error(f"Failed to connect to backend (attempt {self.connection_retry_count}): {e}")
             return None
+
+    async def send_heartbeat(self) -> None:
+        """
+        Send periodic heartbeat to maintain connection.
+        """
+        while self.running and self.websocket:
+            try:
+                await asyncio.sleep(30)  # Send heartbeat every 30 seconds
+                
+                if self.websocket and not self.websocket.closed:
+                    heartbeat_message = {
+                        "type": "HEARTBEAT",
+                        "agent_id": self.agent_id,
+                        "timestamp": time.time(),
+                        "connection_id": self.connection_id
+                    }
+                    
+                    await self.websocket.send(json.dumps(heartbeat_message))
+                    self.last_heartbeat = time.time()
+                    logger.debug(f"Heartbeat sent for agent {self.agent_id}")
+                else:
+                    logger.warning("WebSocket closed, stopping heartbeat")
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Heartbeat failed: {e}")
+                break
+
+    async def check_connection_health(self) -> bool:
+        """
+        Check if the WebSocket connection is healthy.
+        
+        Returns:
+            True if connection is healthy, False otherwise
+        """
+        if not self.websocket or self.websocket.closed:
+            return False
+            
+        # Check if we haven't received a response in too long
+        time_since_heartbeat = time.time() - self.last_heartbeat
+        if time_since_heartbeat > 60:  # 1 minute timeout
+            logger.warning(f"No heartbeat response for {time_since_heartbeat:.1f} seconds")
+            return False
+            
+        return True
 
     async def process_message(
         self, websocket: websockets.WebSocketServerProtocol, message: str
@@ -411,6 +480,12 @@ class CustardMongoAgent:
             command_type = command.get("type")
 
             logger.info(f"Received command: {command_type}")
+
+            # Handle heartbeat responses
+            if command_type == "PONG" or command_type == "HEARTBEAT_RESPONSE":
+                self.last_heartbeat = time.time()
+                logger.debug(f"Heartbeat response received for agent {self.agent_id}")
+                return
 
             # Route to appropriate handler
             if command_type in self.handlers:
@@ -432,36 +507,80 @@ class CustardMongoAgent:
 
     async def run(self) -> None:
         """
-        Main agent loop that connects and listens for commands.
+        Main agent loop that connects and listens for commands with improved stability.
         """
         self.running = True
         logger.info(f"Starting Custard MongoDB Agent: {self.agent_id} (Connection: {self.connection_id})")
 
         while self.running:
-            websocket = await self.connect_to_backend()
-
-            if websocket is None:
-                logger.warning("Connection failed, retrying in 5 seconds...")
-                await asyncio.sleep(5)
-                continue
-
             try:
-                # Listen for messages
-                async for message in websocket:
-                    await self.process_message(websocket, message)
+                # Connect to backend with exponential backoff
+                websocket = await self.connect_to_backend()
 
-            except websockets.exceptions.ConnectionClosed:
-                logger.info("Connection to backend closed")
+                if websocket is None:
+                    # Exponential backoff for connection failures
+                    delay = min(self.retry_delay * (2 ** min(self.connection_retry_count, 5)), 300)  # Max 5 minutes
+                    logger.warning(f"Connection failed, retrying in {delay} seconds... (attempt {self.connection_retry_count + 1})")
+                    await asyncio.sleep(delay)
+                    continue
+
+                # Reset retry count on successful connection
+                self.connection_retry_count = 0
+                self.retry_delay = 5
+
+                # Start heartbeat task
+                self.heartbeat_task = asyncio.create_task(self.send_heartbeat())
+                
+                logger.info(f"MongoDB Agent {self.agent_id} is now online and ready to receive commands")
+
+                try:
+                    # Listen for messages with timeout
+                    while self.running:
+                        try:
+                            # Use asyncio.wait_for to add timeout to message receiving
+                            message = await asyncio.wait_for(websocket.recv(), timeout=60.0)
+                            await self.process_message(websocket, message)
+                            
+                            # Check connection health periodically
+                            if not await self.check_connection_health():
+                                logger.warning("Connection health check failed, reconnecting...")
+                                break
+                                
+                        except asyncio.TimeoutError:
+                            logger.debug("No messages received in 60 seconds, checking connection health...")
+                            if not await self.check_connection_health():
+                                logger.warning("Connection appears unhealthy, reconnecting...")
+                                break
+                            continue
+
+                except websockets.exceptions.ConnectionClosed as e:
+                    logger.info(f"WebSocket connection closed: {e}")
+                except Exception as e:
+                    logger.error(f"Error in message loop: {e}")
+                finally:
+                    # Clean up heartbeat task
+                    if self.heartbeat_task:
+                        self.heartbeat_task.cancel()
+                        try:
+                            await self.heartbeat_task
+                        except asyncio.CancelledError:
+                            pass
+                        self.heartbeat_task = None
+
+                    # Close websocket connection
+                    if websocket and not websocket.closed:
+                        await websocket.close()
+                    self.websocket = None
+
+                # Brief delay before reconnecting
+                if self.running:
+                    logger.info("Preparing to reconnect...")
+                    await asyncio.sleep(2)
+
             except Exception as e:
-                logger.error(f"Error in main loop: {e}")
-            finally:
-                if websocket:
-                    await websocket.close()
-
-            # Wait before reconnecting
-            if self.running:
-                logger.info("Reconnecting in 5 seconds...")
-                await asyncio.sleep(5)
+                logger.error(f"Fatal error in main loop: {e}")
+                if self.running:
+                    await asyncio.sleep(10)  # Wait longer on fatal errors
 
     def stop(self) -> None:
         """Stop the agent."""

@@ -172,6 +172,11 @@ class ConnectionManager:
             await self.handle_ping(agent_id, message)
             return
 
+        # Handle HEARTBEAT messages directly
+        if message_type == "HEARTBEAT":
+            await self.handle_heartbeat(agent_id, message)
+            return
+
         # Handle AGENT_CONNECTED messages directly (trigger automatic schema refresh)
         if message_type == "AGENT_CONNECTED":
             await self.handle_agent_connected(agent_id, message)
@@ -231,6 +236,35 @@ class ConnectionManager:
             logger.debug(f"Sent PONG response to agent '{agent_id}'")
         else:
             logger.warning(f"Failed to send PONG response to agent '{agent_id}'")
+
+    async def handle_heartbeat(self, agent_id: str, message: Dict[str, Any]) -> None:
+        """
+        Handle a HEARTBEAT message from an agent.
+
+        Args:
+            agent_id: ID of the agent that sent the heartbeat
+            message: The HEARTBEAT message data
+        """
+        logger.debug(f"Received HEARTBEAT from agent '{agent_id}'")
+        
+        # Update connection metadata with heartbeat timestamp
+        if agent_id in self.connection_metadata:
+            self.connection_metadata[agent_id]["last_heartbeat"] = time.time()
+            self.connection_metadata[agent_id]["last_activity"] = time.time()
+        
+        # Send heartbeat response back to agent
+        heartbeat_response = {
+            "type": "HEARTBEAT_RESPONSE",
+            "agent_id": agent_id,
+            "timestamp": time.time(),
+            "status": "acknowledged"
+        }
+        
+        success = await self.send_json_to_agent(heartbeat_response, agent_id)
+        if success:
+            logger.debug(f"Sent HEARTBEAT response to agent '{agent_id}'")
+        else:
+            logger.warning(f"Failed to send HEARTBEAT response to agent '{agent_id}'")
 
     async def handle_agent_connected(self, agent_id: str, message: Dict[str, Any]) -> None:
         """
