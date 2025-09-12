@@ -4,6 +4,7 @@ import os
 import asyncio
 import time
 import websockets
+from websockets.protocol import State
 import json
 import psycopg2
 import logging
@@ -224,7 +225,7 @@ def discover_database_schema() -> Union[Dict[str, Any], str]:
 
 
 async def handle_sql_query(
-    websocket: websockets.WebSocketClientProtocol, command: Dict[str, Any]
+    websocket: Any, command: Dict[str, Any]
 ) -> None:
     """
     Handle a SQL query request from the backend.
@@ -272,7 +273,7 @@ async def handle_sql_query(
 
 
 async def handle_schema_discovery(
-    websocket: websockets.WebSocketClientProtocol, command: Dict[str, Any]
+    websocket: Any, command: Dict[str, Any]
 ) -> None:
     """
     Handle a schema discovery request from the backend.
@@ -327,7 +328,7 @@ async def handle_schema_discovery(
 
 
 async def handle_ping(
-    websocket: websockets.WebSocketClientProtocol, command: Dict[str, Any]
+    websocket: Any, command: Dict[str, Any]
 ) -> None:
     """
     Handle a ping request to check agent health.
@@ -372,7 +373,13 @@ class AgentPostgreSQL:
         self.last_heartbeat = time.time()
 
         # Initialize schema discoverer
-        self.schema_discoverer = SchemaDiscoverer(DB_CONFIG)
+        self.schema_discoverer = SchemaDiscoverer(
+            host=DB_CONFIG["host"],
+            port=DB_CONFIG["port"],
+            dbname=DB_CONFIG["dbname"],
+            user=DB_CONFIG["user"],
+            password=DB_CONFIG["password"]
+        )
 
         # Command handlers
         self.handlers = {
@@ -381,7 +388,7 @@ class AgentPostgreSQL:
             "PING": handle_ping,
         }
 
-    async def connect_to_backend(self) -> Optional[websockets.WebSocketClientProtocol]:
+    async def connect_to_backend(self) -> Optional[Any]:
         """
         Establish connection to the backend with exponential backoff retry.
 
@@ -422,7 +429,7 @@ class AgentPostgreSQL:
             try:
                 await asyncio.sleep(30)  # Send heartbeat every 30 seconds
                 
-                if self.websocket and not self.websocket.closed:
+                if self.websocket and self.websocket.state != State.CLOSED:
                     heartbeat_message = {
                         "type": "HEARTBEAT",
                         "agent_id": self.agent_id,
@@ -448,7 +455,7 @@ class AgentPostgreSQL:
         Returns:
             True if connection is healthy, False otherwise
         """
-        if not self.websocket or self.websocket.closed:
+        if not self.websocket or self.websocket.state == State.CLOSED:
             return False
             
         # Check if we haven't received a response in too long
@@ -460,7 +467,7 @@ class AgentPostgreSQL:
         return True
 
     async def process_message(
-        self, websocket: websockets.WebSocketClientProtocol, message: str
+        self, websocket: Any, message: str
     ) -> None:
         """
         Process an incoming message from the backend.
@@ -562,7 +569,7 @@ class AgentPostgreSQL:
                         self.heartbeat_task = None
 
                     # Close websocket connection
-                    if websocket and not websocket.closed:
+                    if websocket and websocket.state != State.CLOSED:
                         await websocket.close()
                     self.websocket = None
 
