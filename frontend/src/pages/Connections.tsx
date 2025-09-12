@@ -94,9 +94,10 @@ GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE PUBLIC;`;
 
 
 // Connection Form Component with Step 1: Name Your Connection
-function ConnectionForm({ databaseTemplate, onStepChange }: { 
+function ConnectionForm({ databaseTemplate, onStepChange, isSelfHost }: { 
   databaseTemplate: DatabaseTemplate;
   onStepChange?: (step: number) => void;
+  isSelfHost: boolean;
 }) {
   const createConnectionMutation = useCreateConnection();
   const [currentStep, setCurrentStep] = useState(1);
@@ -167,8 +168,9 @@ function ConnectionForm({ databaseTemplate, onStepChange }: {
   if (currentStep === 1) {
     return (
       <div className="space-y-6">
-        
-        <form onSubmit={handleStep1Submit} className="space-y-4">
+        {isSelfHost ? (
+          // Self Host Mode - Show current interface
+          <form onSubmit={handleStep1Submit} className="space-y-4">
           {createConnectionMutation.error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -212,6 +214,44 @@ function ConnectionForm({ databaseTemplate, onStepChange }: {
             </Button>
           </div>
         </form>
+        ) : (
+          // Host Agent with Custard Mode - Show blank interface with same heading
+          <form onSubmit={handleStep1Submit} className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="connectionName" className="text-sm font-medium text-gray-700">
+                Connection Name
+              </label>
+              <Input
+                id="connectionName"
+                type="text"
+                placeholder="e.g., Production Analytics DB"
+                value={connectionName}
+                onChange={(e) => setConnectionName(e.target.value)}
+                required
+              />
+              <p className="text-xs text-gray-500">
+                This is a friendly name for your own reference.
+              </p>
+            </div>
+            
+            <div className="flex justify-end gap-3">
+              <Button 
+                type="submit" 
+                disabled={createConnectionMutation.isPending || !connectionName.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {createConnectionMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  'Generate Connection Command'
+                )}
+              </Button>
+            </div>
+          </form>
+        )}
       </div>
     );
   }
@@ -703,13 +743,18 @@ function SimpleConnectionCard({ connection, onDelete }: {
 }
 
 // Toggle Button Component
-function HostingToggle() {
-  const [isSelfHost, setIsSelfHost] = useState(false);
+function HostingToggle({ 
+  isSelfHost, 
+  onHostingModeChange 
+}: { 
+  isSelfHost: boolean; 
+  onHostingModeChange: (isSelfHost: boolean) => void;
+}) {
 
   return (
     <div className="flex items-center bg-gray-100 rounded-lg p-1">
       <button
-        onClick={() => setIsSelfHost(false)}
+        onClick={() => onHostingModeChange(false)}
         className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
           !isSelfHost 
             ? 'bg-white text-blue-600 shadow-sm' 
@@ -720,7 +765,7 @@ function HostingToggle() {
         Host Agent with Custard
       </button>
       <button
-        onClick={() => setIsSelfHost(true)}
+        onClick={() => onHostingModeChange(true)}
         className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
           isSelfHost 
             ? 'bg-white text-blue-600 shadow-sm' 
@@ -748,6 +793,8 @@ function ConnectionBottomBar({
   currentStep: number;
   onStepChange: (step: number) => void;
 }) {
+  const [isSelfHost, setIsSelfHost] = useState(true);
+  
   if (!isOpen || !databaseTemplate) return null;
 
   return (
@@ -795,7 +842,10 @@ function ConnectionBottomBar({
                   </p>
                 </div>
               </div>
-              <HostingToggle />
+              <HostingToggle 
+                isSelfHost={isSelfHost} 
+                onHostingModeChange={setIsSelfHost} 
+              />
             </div>
           )}
           
@@ -809,13 +859,17 @@ function ConnectionBottomBar({
                   Set up a secure connection to your database using our lightweight agent.
                 </p>
               </div>
-              <HostingToggle />
+              <HostingToggle 
+                isSelfHost={isSelfHost} 
+                onHostingModeChange={setIsSelfHost} 
+              />
             </div>
           )}
           
           <ConnectionForm 
             databaseTemplate={databaseTemplate} 
             onStepChange={onStepChange}
+            isSelfHost={isSelfHost}
           />
         </div>
       </div>

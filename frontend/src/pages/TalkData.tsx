@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Database, RefreshCw } from "lucide-react";
+import { Send, Bot, User, Database, RefreshCw, Plus, Upload, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useConnections } from "@/hooks/useConnections";
 import { queryService } from "@/services/queryService";
 import { QueryRequest, QueryResponse } from "@/types/api";
@@ -28,8 +29,12 @@ export default function TalkData() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
   const [agentStatus, setAgentStatus] = useState<{ [connectionId: string]: boolean }>({});
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Fetch connections
   const { data: connections, isLoading: connectionsLoading, error: connectionsError } = useConnections();
@@ -193,6 +198,60 @@ export default function TalkData() {
       preventDefault: () => {}
     } as React.FormEvent;
     handleSubmit(syntheticEvent, messageId);
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file && (file.type === 'text/csv' || file.name.endsWith('.csv'))) {
+      setUploadedFile(file);
+      setIsUploadDialogOpen(false);
+      console.log('CSV file uploaded:', file.name);
+    } else {
+      alert('Please select a valid CSV file.');
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file && (file.type === 'text/csv' || file.name.endsWith('.csv'))) {
+      setUploadedFile(file);
+      setIsUploadDialogOpen(false);
+      console.log('CSV file uploaded via drag & drop:', file.name);
+    } else {
+      alert('Please drop a valid CSV file.');
+    }
+  };
+
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  const clearUploadedFile = () => {
+    setUploadedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const openUploadDialog = () => {
+    setIsUploadDialogOpen(true);
+  };
+
+  const closeUploadDialog = () => {
+    setIsUploadDialogOpen(false);
+    setDragOver(false);
   };
 
   return (
@@ -390,6 +449,28 @@ export default function TalkData() {
       {/* Input Bar */}
       <div className="pt-4 bg-background">
         <form onSubmit={handleSubmit} className="flex gap-3">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          
+          {/* CSV Upload Button */}
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={uploadedFile ? clearUploadedFile : openUploadDialog}
+            disabled={isLoading}
+            className={`h-12 px-4 bg-card border-border hover:bg-accent hover:text-accent-foreground ${uploadedFile ? 'border-green-500 bg-green-50' : ''}`}
+            title={uploadedFile ? `Uploaded: ${uploadedFile.name} (click to clear)` : 'Upload CSV file'}
+          >
+            <Plus className="w-4 h-4" />
+          </Button>
+          
           <Input
             ref={inputRef}
             value={input}
@@ -408,6 +489,98 @@ export default function TalkData() {
           </Button>
         </form>
       </div>
+
+      {/* CSV Upload Dialog */}
+      <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="w-5 h-5" />
+              Upload CSV File
+            </DialogTitle>
+            <DialogDescription>
+              Select a CSV file to upload and analyze with your database connection.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {/* Drag and Drop Area */}
+            <div
+              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                dragOver 
+                  ? 'border-primary bg-primary/5' 
+                  : 'border-muted-foreground/25 hover:border-primary/50'
+              }`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center">
+                  <FileText className="w-6 h-6 text-muted-foreground" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">
+                    Drag and drop your CSV file here
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    or click the button below to browse
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={triggerFileUpload}
+                  className="mt-2"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Choose File
+                </Button>
+              </div>
+            </div>
+
+            {/* File Info */}
+            {uploadedFile && (
+              <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <FileText className="w-5 h-5 text-green-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-green-800">
+                    {uploadedFile.name}
+                  </p>
+                  <p className="text-xs text-green-600">
+                    {(uploadedFile.size / 1024).toFixed(1)} KB
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearUploadedFile}
+                  className="text-green-600 hover:text-green-700"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeUploadDialog}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => {
+                if (uploadedFile) {
+                  setIsUploadDialogOpen(false);
+                } else {
+                  triggerFileUpload();
+                }
+              }}
+              disabled={!uploadedFile}
+            >
+              Upload File
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
