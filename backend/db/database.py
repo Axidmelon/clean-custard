@@ -49,8 +49,6 @@ engine = create_engine(
     # Production optimizations for Supabase
     pool_reset_on_return="commit",
     isolation_level="READ_COMMITTED",
-    # Additional Supabase optimizations
-    pool_events=True,
 )
 
 # A SessionLocal class is a factory for creating new database sessions.
