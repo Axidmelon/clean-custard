@@ -5,10 +5,6 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/auth-hooks";
 import { User as UserType } from "@/contexts/auth-constants";
 const navigationItems = [{
-  title: "Dashboard",
-  url: "/",
-  icon: BarChart3
-}, {
   title: "Talk Data",
   url: "/talk-data",
   icon: MessageSquare
@@ -34,7 +30,6 @@ export function AppSidebar() {
   const { user } = authContext as { user: UserType | null };
   const currentPath = location.pathname;
   const isActive = (path: string) => {
-    if (path === "/") return currentPath === "/";
     return currentPath.startsWith(path);
   };
   const getNavClassName = (path: string) => {

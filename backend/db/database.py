@@ -18,9 +18,9 @@ SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 if not SQLALCHEMY_DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 
-# Database connection pool settings - optimized for Supabase free tier
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))  # Reduced from 20 to 5
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))  # Reduced from 30 to 10
+# Database connection pool settings - optimized for Supabase Nano tier
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "15"))  # Match Supabase pool size
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))  # Additional connections
 DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "10"))  # Reduced from 30 to 10
 DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # Reduced from 3600 to 1800 (30 min)
 DB_POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
@@ -33,7 +33,6 @@ if "postgresql" in SQLALCHEMY_DATABASE_URL:
         "options": "-c default_transaction_isolation=read_committed",
         "application_name": "custard-backend",
         "connect_timeout": 10,
-        "command_timeout": 30,
     })
 
 engine = create_engine(

@@ -6,7 +6,6 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { AppLayout } from "./components/layout/AppLayout";
 import ErrorBoundary from "./components/ErrorBoundaryWrapper";
 import { globalErrorHandler } from "./lib/errorHandler";
-import Dashboard from "./pages/Dashboard";
 import TalkData from "./pages/TalkData";
 import Connections from "./pages/Connections";
 import Settings from "./pages/Settings";
@@ -57,9 +56,9 @@ const App = () => {
                 <Route path="/verify-email" element={<EmailVerification />} />
                 <Route path="/auth/reset-password" element={<ResetPassword />} />
                 
-                {/* Protected Dashboard Routes */}
+                {/* Protected Routes */}
                 <Route path="/" element={<AppLayout />}>
-                  <Route index element={<Dashboard />} />
+                  <Route index element={<TalkData />} />
                   <Route path="talk-data" element={<TalkData />} />
                   <Route path="connections" element={<Connections />} />
                   <Route path="settings" element={<Settings />} />

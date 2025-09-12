@@ -1,9 +1,9 @@
 // This component should not be used since the routing handles the index route
-// The Dashboard component should be rendered for the "/" route
-import Dashboard from "./Dashboard";
+// The TalkData component should be rendered for the "/" route
+import TalkData from "./TalkData";
 
 const Index = () => {
-  return <Dashboard />;
+  return <TalkData />;
 };
 
 export default Index;
