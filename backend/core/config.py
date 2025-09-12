@@ -29,7 +29,6 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     reload: bool = False
-    allowed_origins: str = ""
     frontend_url: str = "http://localhost:8080"
     backend_url: str = "http://localhost:8000"
     # External Services
@@ -50,7 +49,7 @@ class Settings(BaseSettings):
     enable_docs: bool = True
     
     # Production Security
-    cors_origins: str = ""
+    allowed_origins: str = ""
     max_request_size: int = 16 * 1024 * 1024  # 16MB
     request_timeout: int = 30
     keep_alive_timeout: int = 5
@@ -62,6 +61,10 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_redis_url: Optional[str] = None
+    
+    # Redis Configuration
+    redis_url: str = "redis://localhost:6379/0"
+    redis_enabled: bool = True
 
     # Backup & Recovery
     backup_enabled: bool = False
@@ -106,13 +109,6 @@ class Settings(BaseSettings):
     @field_validator("allowed_origins")
     @classmethod
     def parse_allowed_origins(cls, v):
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v or []
-    
-    @field_validator("cors_origins")
-    @classmethod
-    def parse_cors_origins(cls, v):
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v or []
@@ -168,12 +164,11 @@ def validate_production_readiness() -> List[str]:
     if settings.enable_docs:
         errors.append("ENABLE_DOCS should be 'false' in production")
 
-    # Check CORS configuration (use cors_origins if available, otherwise allowed_origins)
-    cors_origins = settings.cors_origins if settings.cors_origins else settings.allowed_origins
-    if not cors_origins:
-        errors.append("CORS_ORIGINS or ALLOWED_ORIGINS must be configured for production")
+    # Check CORS configuration
+    if not settings.allowed_origins:
+        errors.append("ALLOWED_ORIGINS must be configured for production")
 
-    if any("localhost" in origin for origin in cors_origins):
+    if any("localhost" in origin for origin in settings.allowed_origins):
         errors.append("CORS origins should not include localhost in production")
 
     if settings.frontend_url.startswith("http://localhost"):

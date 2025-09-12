@@ -1,6 +1,7 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from db.dependencies import get_db
 from db.models import Connection
@@ -15,8 +16,10 @@ from pydantic import BaseModel
 
 
 class QueryRequest(BaseModel):
-    connection_id: str
+    connection_id: Optional[str] = None
+    file_id: Optional[str] = None
     question: str
+    data_source: str = "database"  # "database" or "csv"
 
 
 class QueryResponse(BaseModel):
@@ -47,7 +50,46 @@ def format_agent_result(result: list) -> str:
 async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(get_db)):
     """
     This endpoint orchestrates the entire "question-to-answer" flow.
+    Supports both database and CSV data sources.
     """
+    # Route to appropriate handler based on data source
+    if request.data_source == "csv":
+        return await handle_data_analysis_query(request, db)
+    else:
+        return await handle_database_query(request, db)
+
+async def handle_data_analysis_query(request: QueryRequest, db: Session) -> QueryResponse:
+    """
+    Handle data analysis queries using the data analysis service.
+    """
+    from services.data_analysis_service import data_analysis_service
+    
+    if not request.file_id:
+        raise HTTPException(status_code=400, detail="file_id is required for data analysis queries")
+    
+    try:
+        # Process data analysis query
+        result = await data_analysis_service.process_query(request.question, request.file_id)
+        
+        # Convert to QueryResponse format
+        return QueryResponse(
+            answer=result["natural_response"],
+            sql_query="",  # Data analysis queries don't generate SQL
+            data=result["data"],
+            columns=result["columns"],
+            row_count=result["row_count"]
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process data analysis query: {str(e)}")
+
+async def handle_database_query(request: QueryRequest, db: Session) -> QueryResponse:
+    """
+    Handle database-based queries using the existing agent system.
+    """
+    if not request.connection_id:
+        raise HTTPException(status_code=400, detail="connection_id is required for database queries")
+    
     # 1. Fetch the Connection and its Schema from our database
     # Convert string connection_id to UUID for database query
     try:

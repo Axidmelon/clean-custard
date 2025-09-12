@@ -17,6 +17,11 @@ services:
         reservations:
           memory: 512M
           cpus: '0.5'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     environment:
       - ENVIRONMENT=production
       - DEBUG=false
@@ -43,6 +48,11 @@ services:
         condition: service_healthy
     networks:
       - custard-network
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
 
   postgres:
     image: postgres:15-alpine

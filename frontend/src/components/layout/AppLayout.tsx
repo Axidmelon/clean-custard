@@ -33,10 +33,10 @@ export function AppLayout() {
 
   return (
     <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-background">
+      <div className="h-screen flex w-full bg-background overflow-hidden">
         <AppSidebar />
-        <main className="flex-1 flex flex-col">
-          <div className="flex-1 p-6">
+        <main className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 p-6 overflow-hidden">
             <Outlet />
           </div>
         </main>

@@ -37,6 +37,29 @@ const askQuestion = async (queryData: QueryRequest): Promise<QueryResponse> => {
   return handleResponse<QueryResponse>(response);
 };
 
+// Data analysis query functions
+const askDataAnalysisQuestion = async (fileId: string, question: string): Promise<QueryResponse> => {
+  const queryData: QueryRequest = {
+    file_id: fileId,
+    question: question,
+    data_source: 'csv'
+  };
+  
+  return askQuestion(queryData);
+};
+
+const askDatabaseQuestion = async (connectionId: string, question: string): Promise<QueryResponse> => {
+  const queryData: QueryRequest = {
+    connection_id: connectionId,
+    question: question,
+    data_source: 'database'
+  };
+  
+  return askQuestion(queryData);
+};
+
 export const queryService = {
-  askQuestion
+  askQuestion,
+  askDataAnalysisQuestion,
+  askDatabaseQuestion
 };

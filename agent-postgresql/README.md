@@ -17,7 +17,7 @@ The Agent PostgreSQL is a Python-based service that:
 Copy the environment template and configure it:
 
 ```bash
-cp env.template .env
+cp env.example .env
 ```
 
 Edit `.env` with your configuration:
@@ -43,10 +43,13 @@ DB_PASSWORD=your_password_here
 
 ```bash
 # Build and start the agent with a test database
-docker-compose -f docker-compose-agent.yml up --build
+docker-compose up --build
 
 # Run in background
-docker-compose -f docker-compose-agent.yml up -d --build
+docker-compose up -d --build
+
+# Stop services
+docker-compose down
 ```
 
 #### Option B: Docker Build
@@ -157,13 +160,72 @@ docker inspect agent-postgresql --format='{{.State.Health.Status}}'
 
 ## Production Deployment
 
-For production deployment:
+### Environment Configuration
 
-1. Use a production-ready base image
-2. Configure proper secrets management
-3. Set up monitoring and logging
-4. Use container orchestration (Kubernetes, Docker Swarm)
-5. Implement proper backup and recovery procedures
+For production deployment, ensure you have:
+
+1. **Secure Environment Variables**: Use proper secrets management (e.g., Kubernetes secrets, Docker secrets, or cloud provider secret managers)
+2. **Database SSL**: Set `DB_SSLMODE=require` for secure database connections
+3. **Network Security**: Ensure proper firewall rules and network isolation
+4. **Monitoring**: Set up logging and monitoring for the agent
+
+### Production Docker Compose
+
+Create a production `docker-compose.prod.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  agent-postgresql:
+    build: .
+    container_name: agent-postgresql-prod
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - custard-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import asyncio; import websockets; import psycopg2; print('Agent is healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+networks:
+  custard-network:
+    driver: bridge
+```
+
+### Kubernetes Deployment
+
+For Kubernetes deployment, create these manifests:
+
+1. **ConfigMap** for non-sensitive configuration
+2. **Secret** for database credentials and WebSocket URLs
+3. **Deployment** for the agent pod
+4. **Service** for internal communication (if needed)
+
+### Security Best Practices
+
+1. **Non-root user**: Container runs as unprivileged user `custard`
+2. **Read-only queries**: Agent only executes SELECT statements
+3. **Input validation**: SQL queries are validated before execution
+4. **Connection isolation**: Each agent instance connects to one database
+5. **Minimal attack surface**: Only essential dependencies included
+6. **Health checks**: Built-in container health monitoring
 
 ## Support
 

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # Import API routers
 from api.v1.endpoints import connection, websocket, status_websocket, status
 from api.v1.endpoints import query as query_router
-from api.v1.endpoints import test, auth
+from api.v1.endpoints import test, auth, file_upload, data_analysis
 
 # Import connection manager
 from ws.connection_manager import manager
@@ -188,7 +188,7 @@ if settings.environment == "production":
     # Trusted host middleware for security
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["*"]  # Configure with your actual domains
+        allowed_hosts=["*"]  # Configure with your actual domains in production
     )
 
 # Gzip compression middleware
@@ -213,14 +213,21 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
     
     # HSTS header for HTTPS (only in production)
     if settings.environment == "production":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
     
-    # Content Security Policy
-    csp = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
+    # Content Security Policy - Enhanced for production
+    if settings.environment == "production":
+        csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' wss: ws:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    else:
+        csp = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
+    
     response.headers["Content-Security-Policy"] = csp
     
     return response
@@ -247,6 +254,8 @@ app.include_router(websocket.router, prefix="/api/v1", tags=["WebSocket"])
 app.include_router(status_websocket.router, prefix="/api/v1", tags=["Status WebSocket"])
 app.include_router(status.router, prefix="/api/v1", tags=["Status"])
 app.include_router(query_router.router, prefix="/api/v1", tags=["query"])
+app.include_router(file_upload.router, prefix="/api/v1/files", tags=["File Upload"])
+app.include_router(data_analysis.router, prefix="/api/v1/data", tags=["Data Analysis"])
 app.include_router(test.router, prefix="/api/v1", tags=["test"])
 
 
@@ -332,6 +341,18 @@ def health_check():
             "error": str(e)
         }
         health_data["status"] = "unhealthy"
+
+    # Redis cache check
+    try:
+        from core.redis_service import redis_service
+        redis_stats = redis_service.get_cache_stats()
+        health_data["services"]["redis_cache"] = redis_stats
+    except Exception as e:
+        logger.error(f"Redis cache health check failed: {e}")
+        health_data["services"]["redis_cache"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
 
     # External services check
     if settings.openai_api_key and settings.openai_api_key != "your-openai-api-key-here":

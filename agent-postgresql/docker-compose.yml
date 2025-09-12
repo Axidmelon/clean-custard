@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  agent-postgresql:
+    build: .
+    container_name: agent-postgresql
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - custard-network
+    depends_on:
+      - postgres-test
+    healthcheck:
+      test: ["CMD", "python", "-c", "import asyncio; import websockets; import psycopg2; print('Agent is healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Test PostgreSQL database for development/testing
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-test-data.sql:/docker-entrypoint-initdb.d/init-test-data.sql:ro
+    networks:
+      - custard-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  custard-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

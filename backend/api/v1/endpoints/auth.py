@@ -29,10 +29,15 @@ class ProfileUpdateRequest(BaseModel):
     last_name: str = None
 
 
+class SessionValidationRequest(BaseModel):
+    session_id: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
     user: UserSchema
+    session_id: str = None  # Optional session ID for persistent sessions
 
 
 router = APIRouter()
@@ -139,7 +144,7 @@ def signup_user(user: UserCreate, request: Request, db: Session = Depends(get_db
 @router.post("/auth/login", response_model=TokenResponse)
 def login_user(login_data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """
-    Authenticate user and return JWT token.
+    Authenticate user and return JWT token with Redis caching and persistent sessions.
     """
     # Apply rate limiting
     check_rate_limit(request, "auth")
@@ -161,7 +166,35 @@ def login_user(login_data: LoginRequest, request: Request, db: Session = Depends
     # Create access token
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
 
-    return TokenResponse(access_token=access_token, token_type="bearer", user=user)
+    # Cache user data in Redis for future requests
+    from core.redis_service import redis_service
+    from core.jwt_handler import create_persistent_session
+    
+    user_data = {
+        'id': str(user.id),
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'is_verified': user.is_verified,
+        'organization_id': str(user.organization_id),
+        'created_at': user.created_at.isoformat() if user.created_at else None,
+        'updated_at': user.updated_at.isoformat() if user.updated_at else None
+    }
+    
+    # Cache user data with 1 hour TTL
+    redis_service.cache_user_data(str(user.id), user_data, ttl=3600)
+    
+    # Create persistent session for seamless subsequent logins
+    session_id = create_persistent_session(str(user.id), user_data)
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"User {user.email} logged in successfully. Session: {session_id}")
+    
+    # Add session_id to response for frontend to store
+    response_data = TokenResponse(access_token=access_token, token_type="bearer", user=user)
+    response_data.session_id = session_id  # Add session_id to response
+    
+    return response_data
 
 
 # Still in backend/api/v1/endpoints/auth.py
@@ -243,6 +276,96 @@ def reset_password(request: PasswordResetRequest, db: Session = Depends(get_db))
     return {"message": "Password has been reset successfully."}
 
 
+@router.post("/auth/logout")
+def logout_user(
+    request: Request,
+    current_user: UserSchema = Depends(get_current_user())
+):
+    """
+    Logout user and blacklist their JWT token.
+    """
+    from fastapi.security import HTTPBearer
+    from core.jwt_handler import blacklist_token
+    
+    # Extract token from request
+    oauth2_scheme = HTTPBearer()
+    credentials = oauth2_scheme(request)
+    token = credentials.credentials
+    
+    # Blacklist the token
+    success = blacklist_token(token)
+    
+    if success:
+        logger = logging.getLogger(__name__)
+        logger.info(f"User {current_user.email} logged out successfully")
+        return {"message": "Logged out successfully"}
+    else:
+        logger.warning(f"Failed to blacklist token for user {current_user.email}")
+        return {"message": "Logged out (token blacklisting failed)"}
+
+
+@router.post("/auth/validate-session", response_model=TokenResponse)
+def validate_session(session_data: SessionValidationRequest):
+    """
+    Validate a persistent session and return a new JWT token.
+    This enables seamless login for returning users.
+    """
+    from core.jwt_handler import validate_persistent_session, create_access_token
+    
+    # Validate the session
+    session_info = validate_persistent_session(session_data.session_id)
+    
+    if not session_info:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    
+    user_data = session_info.get('user_data')
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Invalid session data")
+    
+    # Create new access token
+    access_token = create_access_token(data={
+        "sub": user_data['id'], 
+        "email": user_data['email']
+    })
+    
+    # Convert user_data back to User object for response
+    from db.models import User
+    user = User()
+    for key, value in user_data.items():
+        if key != '_cached_at':  # Skip cache metadata
+            setattr(user, key, value)
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Validated session for user {user_data['email']}")
+    
+    return TokenResponse(
+        access_token=access_token, 
+        token_type="bearer", 
+        user=user,
+        session_id=session_data.session_id
+    )
+
+
+@router.post("/auth/logout-all-devices")
+def logout_all_devices(
+    current_user: UserSchema = Depends(get_current_user())
+):
+    """
+    Logout user from all devices by revoking all sessions.
+    """
+    from core.jwt_handler import revoke_user_sessions
+    
+    success = revoke_user_sessions(str(current_user.id))
+    
+    if success:
+        logger = logging.getLogger(__name__)
+        logger.info(f"Revoked all sessions for user {current_user.email}")
+        return {"message": "Logged out from all devices successfully"}
+    else:
+        logger.warning(f"Failed to revoke sessions for user {current_user.email}")
+        return {"message": "Logout from all devices failed"}
+
+
 @router.put("/auth/update-profile", response_model=UserSchema)
 def update_user_profile(
     profile_data: ProfileUpdateRequest,
@@ -250,7 +373,7 @@ def update_user_profile(
     current_user: UserSchema = Depends(get_current_user()),
 ):
     """
-    Update user profile information.
+    Update user profile information and invalidate cache.
     """
     # Get the user from database
     user = user_service.get_user_by_id(db, user_id=current_user.id)
@@ -269,5 +392,12 @@ def update_user_profile(
 
     db.commit()
     db.refresh(user)
+    
+    # Invalidate cached user data since profile was updated
+    from core.redis_service import redis_service
+    redis_service.invalidate_user_cache(str(user.id))
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Updated profile for user {user.email} and invalidated cache")
 
     return user

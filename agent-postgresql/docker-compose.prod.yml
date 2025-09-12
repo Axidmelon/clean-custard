@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  agent-postgresql:
+    build: .
+    container_name: agent-postgresql-prod
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - custard-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import asyncio; import websockets; import psycopg2; print('Agent is healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  custard-network:
+    driver: bridge

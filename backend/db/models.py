@@ -73,3 +73,27 @@ class Connection(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     organization = relationship("Organization", back_populates="connections")
+
+
+class UploadedFile(Base):
+    """Represents an uploaded file for an organization."""
+
+    __tablename__ = "uploaded_files"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    original_filename = Column(String, nullable=False)
+    file_size = Column(String, nullable=False)  # Store as string to handle large numbers
+    file_path = Column(String, nullable=False)  # Cloudinary public_id or file path
+    file_url = Column(String, nullable=False)  # Public URL to access the file
+    content_type = Column(String, nullable=True)
+    cloudinary_public_id = Column(String, nullable=True)  # Cloudinary specific ID
+    
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+
+    # --- Production-Ready Improvement: Timestamps ---
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    organization = relationship("Organization")
+    user = relationship("User")

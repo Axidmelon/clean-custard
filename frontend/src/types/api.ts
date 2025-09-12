@@ -49,8 +49,10 @@ export interface ApiError {
 
 // Query types
 export interface QueryRequest {
-  connection_id: string;
+  connection_id?: string;
+  file_id?: string;
   question: string;
+  data_source: 'database' | 'csv';
 }
 
 export interface QueryResponse {

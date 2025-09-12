@@ -3,11 +3,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { FileUploadProvider } from "./contexts/FileUploadContext";
 import { AppLayout } from "./components/layout/AppLayout";
 import ErrorBoundary from "./components/ErrorBoundaryWrapper";
 import { globalErrorHandler } from "./lib/errorHandler";
 import TalkData from "./pages/TalkData";
 import Connections from "./pages/Connections";
+import Uploads from "./pages/Uploads";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import Landing from "./pages/Landing";
@@ -45,9 +47,10 @@ const App = () => {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthProvider>
-            <StatusWebSocketInitializer />
-            <Toaster />
-            <BrowserRouter>
+            <FileUploadProvider>
+              <StatusWebSocketInitializer />
+              <Toaster />
+              <BrowserRouter>
               <Routes>
                 {/* Public Routes */}
                 <Route path="/landing" element={<Landing />} />
@@ -60,6 +63,7 @@ const App = () => {
                 <Route path="/" element={<AppLayout />}>
                   <Route index element={<TalkData />} />
                   <Route path="talk-data" element={<TalkData />} />
+                  <Route path="uploads" element={<Uploads />} />
                   <Route path="connections" element={<Connections />} />
                   <Route path="settings" element={<Settings />} />
                 </Route>
@@ -67,7 +71,8 @@ const App = () => {
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
-            </BrowserRouter>
+              </BrowserRouter>
+            </FileUploadProvider>
           </AuthProvider>
         </TooltipProvider>
       </QueryClientProvider>

@@ -2,6 +2,7 @@
 
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
+from core.config import settings
 
 
 # We are creating a 'class' here. Think of it as a blueprint
@@ -20,7 +21,11 @@ class TextToSQLService:
 
         # 1. Define the AI Model
         # This is the same as before. We're setting up our "brain".
-        self.llm = ChatOpenAI(model="gpt-4-turbo", temperature=0)
+        self.llm = ChatOpenAI(
+            model=settings.openai_model,
+            temperature=settings.openai_temperature,
+            max_tokens=settings.openai_max_tokens
+        )
 
         # 2. Define the Prompt Template
         # This is our detailed instruction manual for the AI.

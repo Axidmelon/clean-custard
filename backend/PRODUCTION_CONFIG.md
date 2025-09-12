@@ -35,7 +35,6 @@ LOG_LEVEL=INFO
 ### CORS Configuration
 ```bash
 ALLOWED_ORIGINS=https://your-frontend.railway.app,https://yourdomain.com
-CORS_ORIGINS=https://your-frontend.railway.app,https://yourdomain.com
 FRONTEND_URL=https://your-frontend.railway.app
 BACKEND_URL=https://your-backend.railway.app
 ```
