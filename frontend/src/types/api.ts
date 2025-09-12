@@ -56,4 +56,7 @@ export interface QueryRequest {
 export interface QueryResponse {
   answer: string;
   sql_query: string;
+  data: any[];
+  columns: string[];
+  row_count: number;
 }

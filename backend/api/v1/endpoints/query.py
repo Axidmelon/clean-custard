@@ -22,6 +22,9 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     sql_query: str
+    data: list = []
+    columns: list = []
+    row_count: int = 0
 
 
 # --- Helper Function to format the agent's response ---
@@ -102,8 +105,26 @@ async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(
         error_detail = agent_response.get("error", "Unknown agent error.")
         raise HTTPException(status_code=502, detail=f"Agent returned an error: {error_detail}")
 
-    # 4. Format the raw result from the agent into a human-readable answer
-    final_answer = format_agent_result(agent_response.get("data", []))
+    # 4. Get the raw data from the agent response
+    raw_data = agent_response.get("data", [])
+    columns = agent_response.get("columns", [])
+    row_count = agent_response.get("row_count", 0)
+    
+    # 5. Create a human-readable answer for simple queries
+    if len(raw_data) == 1 and len(raw_data[0]) == 1:
+        # Single value result
+        final_answer = f"The result is: {raw_data[0][0]}"
+    elif row_count > 0:
+        # Multiple rows result - show count
+        final_answer = f"Query returned {row_count} rows. Showing results in table below."
+    else:
+        final_answer = "The query returned no results."
 
-    # 5. Return the final response to the user
-    return QueryResponse(answer=final_answer, sql_query=generated_sql)
+    # 6. Return the structured response to the user
+    return QueryResponse(
+        answer=final_answer, 
+        sql_query=generated_sql,
+        data=raw_data,
+        columns=columns,
+        row_count=row_count
+    )

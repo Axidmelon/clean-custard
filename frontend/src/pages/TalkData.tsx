@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useConnections } from "@/hooks/useConnections";
 import { queryService } from "@/services/queryService";
 import { QueryRequest, QueryResponse } from "@/types/api";
-import { APP_CONFIG } from "@/lib/constants";
+// import { APP_CONFIG } from "@/lib/constants";
 
 interface Message {
   id: string;
@@ -15,6 +15,9 @@ interface Message {
   content: string;
   code?: string;
   error?: string;
+  data?: any[];
+  columns?: string[];
+  row_count?: number;
 }
 
 export default function TalkData() {
@@ -63,7 +66,10 @@ export default function TalkData() {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
         content: response.answer,
-        code: response.sql_query
+        code: response.sql_query,
+        data: response.data,
+        columns: response.columns,
+        row_count: response.row_count
       };
       
       setMessages(prev => [...prev, assistantMessage]);
@@ -161,6 +167,46 @@ export default function TalkData() {
                     <pre className="text-xs font-mono text-muted-foreground overflow-x-auto">
                       <code>{message.code}</code>
                     </pre>
+                  </div>
+                )}
+                
+                {message.data && message.data.length > 0 && message.columns && (
+                  <div className="mt-3">
+                    <div className="text-xs text-muted-foreground mb-2">
+                      Results ({message.row_count} rows, showing first 10 columns):
+                    </div>
+                    <div className="overflow-x-auto border rounded-md">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/50">
+                          <tr>
+                            {message.columns.slice(0, 10).map((column, index) => (
+                              <th key={index} className="px-3 py-2 text-left font-medium border-b">
+                                {column}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {message.data.slice(0, 100).map((row, rowIndex) => (
+                            <tr key={rowIndex} className="hover:bg-muted/20">
+                              {message.columns?.slice(0, 10).map((column, colIndex) => (
+                                <td key={colIndex} className="px-3 py-2 border-b">
+                                  {row[colIndex] !== null && row[colIndex] !== undefined 
+                                    ? String(row[colIndex]) 
+                                    : <span className="text-muted-foreground italic">null</span>
+                                  }
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {(message.row_count || 0) > 100 && (
+                      <div className="text-xs text-muted-foreground mt-2">
+                        Showing first 100 rows of {message.row_count} total results
+                      </div>
+                    )}
                   </div>
                 )}
               </Card>
