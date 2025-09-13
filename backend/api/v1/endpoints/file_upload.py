@@ -428,7 +428,7 @@ async def files_health_check(db: Session = Depends(get_db)):
 @router.get("/signed-url/{file_id}")
 async def get_signed_url(
     file_id: str,
-    expiration_hours: int = 2,
+    expiration_hours: float = 2.0,
     current_user: User = Depends(get_current_user()),
     db: Session = Depends(get_db)
 ):
@@ -436,11 +436,11 @@ async def get_signed_url(
     Generate a signed URL for direct access to a file
     """
     try:
-        # Validate expiration hours (max 24 hours)
+        # Validate expiration hours (max 24 hours, min 0.1 hours)
         if expiration_hours > 24:
-            expiration_hours = 24
-        elif expiration_hours < 1:
-            expiration_hours = 1
+            expiration_hours = 24.0
+        elif expiration_hours < 0.1:
+            expiration_hours = 0.1
         
         # Find the file in database
         uploaded_file = db.query(UploadedFile).filter(
