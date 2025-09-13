@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # Import API routers
 from api.v1.endpoints import connection, websocket, status_websocket, status
 from api.v1.endpoints import query as query_router
-from api.v1.endpoints import test, auth, file_upload, data_analysis
+from api.v1.endpoints import test, auth, file_upload, data_analysis, langsmith_status
 
 # Import connection manager
 from ws.connection_manager import manager
@@ -256,6 +256,7 @@ app.include_router(status.router, prefix="/api/v1", tags=["Status"])
 app.include_router(query_router.router, prefix="/api/v1", tags=["query"])
 app.include_router(file_upload.router, prefix="/api/v1/files", tags=["File Upload"])
 app.include_router(data_analysis.router, prefix="/api/v1/data", tags=["Data Analysis"])
+app.include_router(langsmith_status.router, prefix="/api/v1", tags=["LangSmith"])
 app.include_router(test.router, prefix="/api/v1", tags=["test"])
 
 

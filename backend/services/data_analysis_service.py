@@ -15,6 +15,7 @@ import re
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from core.config import settings
+from core.langsmith_service import langsmith_service
 from llm.services import ResultFormatter
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,8 @@ class DataAnalysisService:
         self.llm = ChatOpenAI(
             model=settings.openai_model,
             temperature=settings.openai_temperature,
-            max_tokens=settings.openai_max_tokens
+            max_tokens=settings.openai_max_tokens,
+            callbacks=[langsmith_service.get_tracer()] if langsmith_service.is_enabled else None
         )
         self.csv_cache = {}  # Cache for CSV data
         self.schema_cache = {}  # Cache for schema analysis
@@ -371,29 +373,57 @@ PANDAS CODE:
         Returns:
             pandas query string
         """
-        try:
-            # Format schema info for the prompt
-            schema_text = self._format_schema_for_prompt(schema_info)
-            
-            # Generate pandas query using LLM
-            response = await self.query_chain.ainvoke({
-                "schema_info": schema_text,
-                "question": question
-            })
-            
-            pandas_query = response.content.strip()
-            
-            # Clean up the query (remove markdown formatting if present)
-            pandas_query = re.sub(r'```python\n?', '', pandas_query)
-            pandas_query = re.sub(r'```\n?', '', pandas_query)
-            pandas_query = pandas_query.strip()
-            
-            logger.info(f"Generated pandas query: {pandas_query}")
-            return pandas_query
-            
-        except Exception as e:
-            logger.error(f"Error generating pandas query: {e}")
-            raise
+        with langsmith_service.create_trace("pandas_query_generation") as trace_obj:
+            # Add initial metadata
+            trace_obj.metadata = {
+                "question_type": "pandas_analysis",
+                "question_length": len(question),
+                "schema_complexity": len(schema_info.get("columns", [])),
+                "data_shape": schema_info.get("file_info", {}).get("shape", "unknown"),
+                "model": settings.openai_model,
+                "temperature": settings.openai_temperature
+            }
+
+            try:
+                # Format schema info for the prompt
+                schema_text = self._format_schema_for_prompt(schema_info)
+                
+                # Generate pandas query using LLM
+                response = await self.query_chain.ainvoke({
+                    "schema_info": schema_text,
+                    "question": question
+                })
+                
+                pandas_query = response.content.strip()
+                
+                # Clean up the query (remove markdown formatting if present)
+                pandas_query = re.sub(r'```python\n?', '', pandas_query)
+                pandas_query = re.sub(r'```\n?', '', pandas_query)
+                pandas_query = pandas_query.strip()
+                
+                # Add success metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "pandas_query_length": len(pandas_query),
+                    "success": True,
+                    "response_time_ms": "calculated_by_langsmith"
+                })
+                
+                logger.info(f"Generated pandas query: {pandas_query}")
+                langsmith_service.log_trace_event("pandas_query_generation", f"Successfully generated pandas query for question: {question[:100]}...")
+                
+                return pandas_query
+                
+            except Exception as e:
+                # Add error metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                })
+                
+                logger.error(f"Error generating pandas query: {e}")
+                langsmith_service.log_trace_event("pandas_query_error", f"Failed to generate pandas query: {str(e)}")
+                raise
     
     def _format_schema_for_prompt(self, schema_info: Dict[str, Any]) -> str:
         """
@@ -605,8 +635,18 @@ PANDAS CODE:
         Returns:
             Natural language response
         """
-        try:
-            response_prompt = f"""
+        with langsmith_service.create_trace("pandas_natural_response") as trace_obj:
+            # Add initial metadata
+            trace_obj.metadata = {
+                "question_type": "pandas_natural_response",
+                "question_length": len(question),
+                "result_summary_length": len(result_summary),
+                "question_category": "data_analysis",
+                "model": settings.openai_model
+            }
+
+            try:
+                response_prompt = f"""
 You are an expert data analyst who explains query results in natural, conversational language.
 
 User's Question: {question}
@@ -623,17 +663,34 @@ Examples:
 - "Which state has the highest consumers?" with result "California" → "The state with the highest consumers is California"
 
 Response:"""
-            
-            # Use LLM to generate natural response
-            response = self.llm.invoke(response_prompt)
-            natural_response = response.content.strip()
-            
-            logger.info(f"Generated LLM response: {natural_response}")
-            return natural_response
-            
-        except Exception as e:
-            logger.error(f"Error generating LLM response: {e}")
-            return f"Query completed successfully. Result: {result_summary}"
+                
+                # Use LLM to generate natural response
+                response = self.llm.invoke(response_prompt)
+                natural_response = response.content.strip()
+                
+                # Add success metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "response_length": len(natural_response),
+                    "success": True,
+                    "response_time_ms": "calculated_by_langsmith"
+                })
+                
+                logger.info(f"Generated LLM response: {natural_response}")
+                langsmith_service.log_trace_event("pandas_natural_response", f"Successfully generated natural response for question: {question[:100]}...")
+                
+                return natural_response
+                
+            except Exception as e:
+                # Add error metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                })
+                
+                logger.error(f"Error generating LLM response: {e}")
+                langsmith_service.log_trace_event("pandas_natural_response_error", f"Failed to generate natural response: {str(e)}")
+                return f"Query completed successfully. Result: {result_summary}"
     
     def _prepare_result_summary(self, result: Any) -> str:
         """

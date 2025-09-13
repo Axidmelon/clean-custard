@@ -2,14 +2,17 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from typing import Optional
+import logging
 
 from db.dependencies import get_db
 from db.models import Connection
 from llm.services import TextToSQLService
 from ws.connection_manager import manager, ConnectionManager
 from schemas.connection import Connection as ConnectionSchema  # Import your Pydantic schema
+from core.langsmith_service import langsmith_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # --- Pydantic Models for Request and Response ---
 from pydantic import BaseModel
@@ -55,12 +58,52 @@ async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(
     - If file_id is provided (CSV data): AI agent automatically decides between csv_to_sql_converter and data_analysis_service
     - If no file_id (database data): Goes directly to agent-postgresql (no AI routing)
     """
-    # Automatic AI routing: If CSV file is provided, AI agent decides the best service
-    if request.file_id:
-        return await handle_ai_routing(request, db)
-    
-    # No CSV file: Go directly to database analysis (no AI routing)
-    return await handle_database_query(request, db)
+    with langsmith_service.create_trace("query_endpoint") as trace_obj:
+        # Add initial metadata
+        trace_obj.metadata = {
+            "endpoint": "query",
+            "data_source": request.data_source,
+            "has_file_id": bool(request.file_id),
+            "has_connection_id": bool(request.connection_id),
+            "question_length": len(request.question),
+            "user_preference": request.user_preference
+        }
+
+        try:
+            logger.info(f"Processing query request: {request.question[:100]}...")
+            
+            # Automatic AI routing: If CSV file is provided, AI agent decides the best service
+            if request.file_id:
+                result = await handle_ai_routing(request, db)
+            else:
+                # No CSV file: Go directly to database analysis (no AI routing)
+                result = await handle_database_query(request, db)
+            
+            # Add success metadata
+            langsmith_service.add_metadata(trace_obj, {
+                "success": True,
+                "response_type": type(result).__name__,
+                "row_count": result.row_count,
+                "has_sql_query": bool(result.sql_query),
+                "answer_length": len(result.answer)
+            })
+            
+            logger.info(f"Query processed successfully: {result.row_count} rows returned")
+            langsmith_service.log_trace_event("query_endpoint", f"Successfully processed query: {request.question[:100]}...")
+            
+            return result
+            
+        except Exception as e:
+            # Add error metadata
+            langsmith_service.add_metadata(trace_obj, {
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            
+            logger.error(f"Error processing query: {e}")
+            langsmith_service.log_trace_event("query_endpoint_error", f"Failed to process query: {str(e)}")
+            raise
 
 async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse:
     """

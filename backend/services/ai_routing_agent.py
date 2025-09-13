@@ -9,6 +9,7 @@ import json
 
 from langchain_openai import ChatOpenAI
 from core.config import settings
+from core.langsmith_service import langsmith_service
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +43,13 @@ class AIRoutingAgent:
         """Initialize the AI routing agent with LLM."""
         self.logger = logging.getLogger(__name__)
         
-        # Initialize the LLM
+        # Initialize the LLM with LangSmith tracing
         self.llm = ChatOpenAI(
             model=settings.openai_model,
             temperature=0.1,  # Low temperature for consistent routing decisions
             max_tokens=500,
-            timeout=10  # Fast response for routing decisions
+            timeout=10,  # Fast response for routing decisions
+            callbacks=[langsmith_service.get_tracer()] if langsmith_service.is_enabled else None
         )
         
         self.logger.info("AI Routing Agent initialized with LLM")
@@ -63,47 +65,84 @@ class AIRoutingAgent:
         Returns:
             Analysis result with recommended service and AI reasoning
         """
-        try:
-            self.logger.info(f"AI Agent analyzing question: {question[:100]}...")
-            
-            # Create context if not provided
-            if context is None:
-                context = AnalysisContext(question=question)
-            
-            # Build the AI prompt
-            prompt = self._build_routing_prompt(question, context)
-            
-            # Get AI decision
-            ai_response = await self.llm.ainvoke(prompt)
-            
-            # Parse AI response
-            result = self._parse_ai_response(ai_response.content, context)
-            
-            self.logger.info(f"AI Agent recommendation: {result['recommended_service']} (confidence: {result['confidence']:.2f})")
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Error in AI routing: {e}")
-            # Smart fallback based on question complexity
-            question_lower = question.lower()
-            if any(keyword in question_lower for keyword in ['correlation', 'trend', 'analysis', 'regression', 'statistical', 'machine learning', 'ml']):
-                fallback_service = "data_analysis_service"
-                fallback_reasoning = "Complex analysis detected, using pandas service"
-            else:
-                fallback_service = "csv_to_sql_converter"
-                fallback_reasoning = "Simple query detected, using SQL service"
-            
-            return {
-                "recommended_service": fallback_service,
-                "reasoning": f"AI routing failed: {str(e)}. {fallback_reasoning}.",
-                "confidence": 0.3,
-                "ai_analysis": "Error occurred during AI analysis",
-                "context": {
-                    "question": question,
-                    "file_size": context.file_size if context else None,
-                    "data_source": context.data_source if context else None
-                }
+        with langsmith_service.create_trace("ai_routing_decision") as trace_obj:
+            # Add initial metadata
+            trace_obj.metadata = {
+                "question_type": "routing_decision",
+                "question_length": len(question),
+                "file_size": context.file_size if context else None,
+                "user_preference": context.user_preference if context else None,
+                "data_source": context.data_source if context else None,
+                "model": settings.openai_model,
+                "temperature": 0.1
             }
+
+            try:
+                self.logger.info(f"AI Agent analyzing question: {question[:100]}...")
+                
+                # Create context if not provided
+                if context is None:
+                    context = AnalysisContext(question=question)
+                
+                # Build the AI prompt
+                prompt = self._build_routing_prompt(question, context)
+                
+                # Get AI decision
+                ai_response = await self.llm.ainvoke(prompt)
+                
+                # Parse AI response
+                result = self._parse_ai_response(ai_response.content, context)
+                
+                # Add success metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "recommended_service": result["recommended_service"],
+                    "confidence": result["confidence"],
+                    "ai_analysis": result.get("ai_analysis", "unknown"),
+                    "success": True,
+                    "response_time_ms": "calculated_by_langsmith"
+                })
+                
+                self.logger.info(f"AI Agent recommendation: {result['recommended_service']} (confidence: {result['confidence']:.2f})")
+                langsmith_service.log_trace_event("ai_routing_decision", f"Successfully routed to {result['recommended_service']} with confidence {result['confidence']:.2f}")
+                
+                return result
+                
+            except Exception as e:
+                self.logger.error(f"Error in AI routing: {e}")
+                
+                # Smart fallback based on question complexity
+                question_lower = question.lower()
+                if any(keyword in question_lower for keyword in ['correlation', 'trend', 'analysis', 'regression', 'statistical', 'machine learning', 'ml']):
+                    fallback_service = "data_analysis_service"
+                    fallback_reasoning = "Complex analysis detected, using pandas service"
+                else:
+                    fallback_service = "csv_to_sql_converter"
+                    fallback_reasoning = "Simple query detected, using SQL service"
+                
+                # Add fallback metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "recommended_service": fallback_service,
+                    "confidence": 0.3,
+                    "ai_analysis": "fallback_decision",
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "fallback_reasoning": fallback_reasoning
+                })
+                
+                langsmith_service.log_trace_event("ai_routing_fallback", f"AI routing failed, using fallback: {fallback_service}")
+                
+                return {
+                    "recommended_service": fallback_service,
+                    "reasoning": f"AI routing failed: {str(e)}. {fallback_reasoning}.",
+                    "confidence": 0.3,
+                    "ai_analysis": "Error occurred during AI analysis",
+                    "context": {
+                        "question": question,
+                        "file_size": context.file_size if context else None,
+                        "data_source": context.data_source if context else None
+                    }
+                }
     
     def _build_routing_prompt(self, question: str, context: AnalysisContext) -> str:
         """Build the AI prompt for routing decisions."""

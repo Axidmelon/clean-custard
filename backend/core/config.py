@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     backup_schedule: str = "0 2 * * *"
     backup_retention_days: int = 30
 
+    # LangSmith Configuration
+    langsmith_api_key: str = "your-langsmith-api-key-here"
+    langsmith_project: str = "clean-custard"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_tracing_enabled: bool = True
+
     @field_validator("secret_key")
     @classmethod
     def validate_secret_key(cls, v):
@@ -104,6 +110,13 @@ class Settings(BaseSettings):
     def validate_resend_key(cls, v):
         if not v or v == "your-resend-api-key-here":
             raise ValueError("RESEND_API_KEY is required")
+        return v
+
+    @field_validator("langsmith_api_key")
+    @classmethod
+    def validate_langsmith_key(cls, v):
+        if not v or v == "your-langsmith-api-key-here":
+            raise ValueError("LANGSMITH_API_KEY is required")
         return v
 
     @field_validator("allowed_origins")
@@ -179,5 +192,9 @@ def validate_production_readiness() -> List[str]:
 
     if settings.rate_limit_enabled and not settings.rate_limit_redis_url:
         errors.append("RATE_LIMIT_REDIS_URL should be configured when rate limiting is enabled")
+
+    # Check LangSmith configuration
+    if settings.langsmith_tracing_enabled and not settings.langsmith_api_key:
+        errors.append("LANGSMITH_API_KEY should be configured when tracing is enabled")
 
     return errors

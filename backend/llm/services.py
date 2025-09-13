@@ -3,7 +3,11 @@
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from core.config import settings
+from core.langsmith_service import langsmith_service
 from typing import Any, Union
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ResultFormatter:
@@ -139,14 +143,15 @@ class TextToSQLService:
         This is the constructor. It runs when we first create an instance of our service.
         It sets up the AI model and the prompt template, so we don't have to do it every time.
         """
-        print("Initializing TextToSQLService...")
+        logger.info("Initializing TextToSQLService...")
 
-        # 1. Define the AI Model
+        # 1. Define the AI Model with LangSmith tracing
         # This is the same as before. We're setting up our "brain".
         self.llm = ChatOpenAI(
             model=settings.openai_model,
             temperature=settings.openai_temperature,
-            max_tokens=settings.openai_max_tokens
+            max_tokens=settings.openai_max_tokens,
+            callbacks=[langsmith_service.get_tracer()] if langsmith_service.is_enabled else None
         )
 
         # 2. Define the Prompt Template
@@ -175,7 +180,7 @@ SQL Query:
         # 3. Create the LangChain "Chain"
         # We pre-build the chain that connects the prompt and the LLM.
         self.chain = self.prompt | self.llm
-        print("TextToSQLService initialized successfully.")
+        logger.info("TextToSQLService initialized successfully.")
 
     def generate_sql(self, question: str, schema: str) -> str:
         """
@@ -188,16 +193,48 @@ SQL Query:
         Returns:
             A string containing the generated SQL query.
         """
-        print(f"Generating SQL for question: '{question}'")
+        logger.info(f"Generating SQL for question: '{question}'")
 
-        # We "invoke" the chain, passing in the specific data for this request.
-        # The .content attribute contains the AI's final text response.
-        response = self.chain.invoke({"schema": schema, "question": question})
+        with langsmith_service.create_trace("sql_generation") as trace_obj:
+            # Add initial metadata
+            trace_obj.metadata = {
+                "question_type": "sql_generation",
+                "schema_complexity": len(schema),
+                "question_length": len(question),
+                "model": settings.openai_model,
+                "temperature": settings.openai_temperature
+            }
 
-        generated_sql = response.content
-        print(f"Generated SQL: {generated_sql}")
+            try:
+                # We "invoke" the chain, passing in the specific data for this request.
+                # The .content attribute contains the AI's final text response.
+                response = self.chain.invoke({"schema": schema, "question": question})
 
-        return generated_sql
+                generated_sql = response.content
+                
+                # Add success metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "sql_length": len(generated_sql),
+                    "success": True,
+                    "response_time_ms": "calculated_by_langsmith"
+                })
+                
+                logger.info(f"Generated SQL: {generated_sql}")
+                langsmith_service.log_trace_event("sql_generation", f"Successfully generated SQL for question: {question[:100]}...")
+                
+                return generated_sql
+                
+            except Exception as e:
+                # Add error metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                })
+                
+                logger.error(f"Error generating SQL: {e}")
+                langsmith_service.log_trace_event("sql_generation_error", f"Failed to generate SQL: {str(e)}")
+                raise
     
     def generate_natural_response(self, question: str, sql_query: str, query_result: list) -> str:
         """
@@ -211,29 +248,50 @@ SQL Query:
         Returns:
             A natural language response explaining the result
         """
-        print(f"Generating natural response for question: '{question}'")
+        logger.info(f"Generating natural response for question: '{question}'")
         
-        # Handle empty results
-        if not query_result or not query_result[0]:
-            return "The query returned no results."
-        
-        # Extract the result value
-        result_value = query_result[0][0]
-        
-        # Use ResultFormatter for type-safe formatting
-        try:
-            # First try using the ResultFormatter for immediate contextual response
-            contextual_response = ResultFormatter.generate_contextual_response(question, result_value)
-            
-            # If we have a simple single-value result, use the contextual response
-            if len(query_result) == 1 and len(query_result[0]) == 1:
-                print(f"Generated contextual response: {contextual_response}")
-                return contextual_response
-            
-            # For complex results, use LLM with proper formatting
-            formatted_value = ResultFormatter.format_result_by_type(result_value, question)
-            
-            response_prompt = f"""
+        with langsmith_service.create_trace("natural_response_generation") as trace_obj:
+            # Add initial metadata
+            trace_obj.metadata = {
+                "question_type": "natural_response",
+                "question_length": len(question),
+                "sql_query_length": len(sql_query),
+                "result_type": type(query_result).__name__,
+                "result_size": len(query_result) if query_result else 0,
+                "model": settings.openai_model
+            }
+
+            try:
+                # Handle empty results
+                if not query_result or not query_result[0]:
+                    langsmith_service.add_metadata(trace_obj, {
+                        "response_type": "empty_result",
+                        "success": True
+                    })
+                    return "The query returned no results."
+                
+                # Extract the result value
+                result_value = query_result[0][0]
+                
+                # Use ResultFormatter for type-safe formatting
+                try:
+                    # First try using the ResultFormatter for immediate contextual response
+                    contextual_response = ResultFormatter.generate_contextual_response(question, result_value)
+                    
+                    # If we have a simple single-value result, use the contextual response
+                    if len(query_result) == 1 and len(query_result[0]) == 1:
+                        langsmith_service.add_metadata(trace_obj, {
+                            "response_type": "contextual_formatter",
+                            "result_value_type": ResultFormatter.detect_result_type(result_value),
+                            "success": True
+                        })
+                        logger.info(f"Generated contextual response: {contextual_response}")
+                        return contextual_response
+                    
+                    # For complex results, use LLM with proper formatting
+                    formatted_value = ResultFormatter.format_result_by_type(result_value, question)
+                    
+                    response_prompt = f"""
 You are an expert data analyst who explains query results in natural, conversational language.
 
 User's Question: {question}
@@ -251,19 +309,52 @@ Examples:
 - "Which state has the highest consumers?" with result "California" → "The state with the highest consumers is California"
 
 Response:"""
-            
-            # Use the LLM to generate a natural response
-            response = self.llm.invoke(response_prompt)
-            natural_response = response.content.strip()
-            
-            print(f"Generated natural response: {natural_response}")
-            return natural_response
-            
-        except Exception as e:
-            print(f"Error generating natural response: {e}")
-            # Fallback to contextual response
-            try:
-                return ResultFormatter.generate_contextual_response(question, result_value)
-            except Exception as fallback_error:
-                print(f"Fallback error: {fallback_error}")
-                return f"The result is: {result_value}"
+                    
+                    # Use the LLM to generate a natural response
+                    response = self.llm.invoke(response_prompt)
+                    natural_response = response.content.strip()
+                    
+                    # Add success metadata
+                    langsmith_service.add_metadata(trace_obj, {
+                        "response_type": "llm_generated",
+                        "response_length": len(natural_response),
+                        "result_value_type": ResultFormatter.detect_result_type(result_value),
+                        "success": True
+                    })
+                    
+                    logger.info(f"Generated natural response: {natural_response}")
+                    langsmith_service.log_trace_event("natural_response_generation", f"Successfully generated natural response for question: {question[:100]}...")
+                    
+                    return natural_response
+                    
+                except Exception as e:
+                    logger.error(f"Error generating natural response: {e}")
+                    # Fallback to contextual response
+                    try:
+                        fallback_response = ResultFormatter.generate_contextual_response(question, result_value)
+                        langsmith_service.add_metadata(trace_obj, {
+                            "response_type": "fallback_contextual",
+                            "success": True,
+                            "fallback_reason": str(e)
+                        })
+                        return fallback_response
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback error: {fallback_error}")
+                        langsmith_service.add_metadata(trace_obj, {
+                            "response_type": "simple_fallback",
+                            "success": True,
+                            "fallback_reason": f"LLM error: {str(e)}, Formatter error: {str(fallback_error)}"
+                        })
+                        return f"The result is: {result_value}"
+                        
+            except Exception as e:
+                # Add error metadata
+                langsmith_service.add_metadata(trace_obj, {
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                })
+                
+                logger.error(f"Error in natural response generation: {e}")
+                langsmith_service.log_trace_event("natural_response_error", f"Failed to generate natural response: {str(e)}")
+                raise
