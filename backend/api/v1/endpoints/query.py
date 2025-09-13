@@ -19,7 +19,8 @@ class QueryRequest(BaseModel):
     connection_id: Optional[str] = None
     file_id: Optional[str] = None
     question: str
-    data_source: str = "database"  # "database", "csv", or "csv_sql"
+    data_source: str = "auto"  # "auto", "database", "csv", or "csv_sql"
+    user_preference: Optional[str] = None  # "sql" or "python" for user preference
 
 
 class QueryResponse(BaseModel):
@@ -50,18 +51,88 @@ def format_agent_result(result: list) -> str:
 async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(get_db)):
     """
     This endpoint orchestrates the entire "question-to-answer" flow.
-    Supports three data sources:
+    Supports AI-powered intelligent routing with these data sources:
+    - "auto": AI agent decides the best service automatically
     - "database": Traditional database queries via agents
     - "csv": CSV data analysis using pandas operations
     - "csv_sql": CSV data analysis using SQL queries on in-memory SQLite
     """
-    # Route to appropriate handler based on data source
+    # Use AI agent for intelligent routing if data_source is "auto"
+    if request.data_source == "auto":
+        return await handle_ai_routing(request, db)
+    
+    # Route to appropriate handler based on explicit data source
     if request.data_source == "csv":
         return await handle_data_analysis_query(request, db)
     elif request.data_source == "csv_sql":
         return await handle_csv_sql_query(request, db)
     else:
         return await handle_database_query(request, db)
+
+async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse:
+    """
+    Handle AI-powered intelligent routing using the AI routing agent.
+    """
+    from services.ai_routing_agent import ai_routing_agent, AnalysisContext
+    from db.models import UploadedFile
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"🤖 AI Agent processing question: {request.question[:100]}...")
+        
+        # Get file information if file_id is provided
+        file_size = None
+        if request.file_id:
+            uploaded_file = db.query(UploadedFile).filter(
+                UploadedFile.id == request.file_id
+            ).first()
+            
+            if uploaded_file:
+                # Estimate file size (this is approximate)
+                file_size = uploaded_file.file_size if hasattr(uploaded_file, 'file_size') else None
+        
+        # Create analysis context
+        context = AnalysisContext(
+            question=request.question,
+            file_size=file_size,
+            data_source="csv" if request.file_id else "database",
+            user_preference=request.user_preference
+        )
+        
+        # Get AI recommendation
+        ai_result = await ai_routing_agent.analyze_and_route(request.question, context)
+        
+        recommended_service = ai_result["recommended_service"]
+        reasoning = ai_result["reasoning"]
+        confidence = ai_result["confidence"]
+        ai_analysis = ai_result.get("ai_analysis", "unknown")
+        
+        logger.info(f"🤖 AI Agent recommendation: {recommended_service} (confidence: {confidence:.2f})")
+        logger.info(f"🧠 AI Analysis: {ai_analysis}")
+        logger.info(f"💭 AI Reasoning: {reasoning}")
+        
+        # Route to the AI-recommended service
+        if recommended_service == "csv":
+            logger.info("🤖 AI routing to CSV pandas analysis")
+            return await handle_data_analysis_query(request, db)
+        elif recommended_service == "csv_sql":
+            logger.info("🤖 AI routing to CSV SQL analysis")
+            return await handle_csv_sql_query(request, db)
+        elif recommended_service == "database":
+            logger.info("🤖 AI routing to database analysis")
+            return await handle_database_query(request, db)
+        else:
+            # Fallback to CSV SQL for unknown recommendations
+            logger.warning(f"🤖 Unknown AI recommendation: {recommended_service}, falling back to CSV SQL")
+            return await handle_csv_sql_query(request, db)
+            
+    except Exception as e:
+        logger.error(f"🤖 Error in AI routing: {e}")
+        # Fallback to CSV SQL on error
+        logger.info("🤖 Falling back to CSV SQL due to AI routing error")
+        return await handle_csv_sql_query(request, db)
 
 async def handle_data_analysis_query(request: QueryRequest, db: Session) -> QueryResponse:
     """
