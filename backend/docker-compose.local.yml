@@ -2,7 +2,7 @@ services:
   custard-backend:
     build:
       context: .
-      dockerfile: Dockerfile.production
+      dockerfile: Dockerfile
     container_name: custard-backend-local
     restart: unless-stopped
     ports:

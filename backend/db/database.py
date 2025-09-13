@@ -19,20 +19,26 @@ if not SQLALCHEMY_DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 
 # Database connection pool settings - optimized for Supabase production
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "8"))  # Reduced for Supabase Nano tier stability
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "3"))  # Conservative overflow for Nano tier
-DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "60"))  # Increased timeout for better reliability
-DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # 1 hour recycle for stability
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))  # Conservative for Supabase Nano tier (max 15)
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))  # Conservative overflow for Nano tier
+DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))  # Reduced timeout for faster failure detection
+DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # 30 minutes recycle for stability
 DB_POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
 
 # Create engine with connection pooling
 connect_args = {}
 if "postgresql" in SQLALCHEMY_DATABASE_URL:
+    # Determine SSL mode based on environment
+    ssl_mode = "require"  # Default for production (Supabase enforces SSL)
+    if "localhost" in SQLALCHEMY_DATABASE_URL or "postgres:" in SQLALCHEMY_DATABASE_URL:
+        # Local development - disable SSL requirement
+        ssl_mode = "disable"
+    
     connect_args.update({
-        "sslmode": "require",
-        "options": "-c default_transaction_isolation=read_committed",
+        "sslmode": ssl_mode,
+        "options": "-c default_transaction_isolation=read\\ committed",
         "application_name": "custard-backend",
-        "connect_timeout": 60,  # Increased to 60 seconds for better reliability
+        "connect_timeout": 30,  # Reduced timeout for faster failure detection
     })
 
 # Set isolation level based on database type
