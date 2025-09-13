@@ -52,7 +52,8 @@ export interface QueryRequest {
   connection_id?: string;
   file_id?: string;
   question: string;
-  data_source: 'database' | 'csv';
+  data_source: 'auto' | 'database' | 'csv' | 'csv_sql';
+  user_preference?: 'sql' | 'python';
 }
 
 export interface QueryResponse {
@@ -61,4 +62,9 @@ export interface QueryResponse {
   data: any[];
   columns: string[];
   row_count: number;
+  ai_routing?: {
+    service_used: string;
+    reasoning: string;
+    confidence: number;
+  };
 }

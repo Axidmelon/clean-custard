@@ -51,27 +51,21 @@ def format_agent_result(result: list) -> str:
 async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(get_db)):
     """
     This endpoint orchestrates the entire "question-to-answer" flow.
-    Supports AI-powered intelligent routing with these data sources:
-    - "auto": AI agent decides the best service automatically
-    - "database": Traditional database queries via agents
-    - "csv": CSV data analysis using pandas operations
-    - "csv_sql": CSV data analysis using SQL queries on in-memory SQLite
+    Automatic intelligent routing:
+    - If file_id is provided (CSV data): AI agent automatically decides between csv_to_sql_converter and data_analysis_service
+    - If no file_id (database data): Goes directly to agent-postgresql (no AI routing)
     """
-    # Use AI agent for intelligent routing if data_source is "auto"
-    if request.data_source == "auto":
+    # Automatic AI routing: If CSV file is provided, AI agent decides the best service
+    if request.file_id:
         return await handle_ai_routing(request, db)
     
-    # Route to appropriate handler based on explicit data source
-    if request.data_source == "csv":
-        return await handle_data_analysis_query(request, db)
-    elif request.data_source == "csv_sql":
-        return await handle_csv_sql_query(request, db)
-    else:
-        return await handle_database_query(request, db)
+    # No CSV file: Go directly to database analysis (no AI routing)
+    return await handle_database_query(request, db)
 
 async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse:
     """
-    Handle AI-powered intelligent routing using the AI routing agent.
+    Handle automatic AI-powered intelligent routing using the AI routing agent.
+    This is automatically triggered when a CSV file is provided.
     """
     from services.ai_routing_agent import ai_routing_agent, AnalysisContext
     from db.models import UploadedFile
@@ -93,11 +87,11 @@ async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse
                 # Estimate file size (this is approximate)
                 file_size = uploaded_file.file_size if hasattr(uploaded_file, 'file_size') else None
         
-        # Create analysis context
+        # Create analysis context (always CSV data since this handler is only called for CSV files)
         context = AnalysisContext(
             question=request.question,
             file_size=file_size,
-            data_source="csv" if request.file_id else "database",
+            data_source="csv",  # Always CSV since this handler is only called when file_id is provided
             user_preference=request.user_preference
         )
         
@@ -113,22 +107,13 @@ async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse
         logger.info(f"🧠 AI Analysis: {ai_analysis}")
         logger.info(f"💭 AI Reasoning: {reasoning}")
         
-        # Route to the AI-recommended service
+        # Route to the AI-recommended service (only CSV services)
         if recommended_service == "data_analysis_service":
             logger.info("🤖 AI routing to data analysis service (pandas)")
             return await handle_data_analysis_query(request, db)
         elif recommended_service == "csv_to_sql_converter":
             logger.info("🤖 AI routing to CSV to SQL converter")
             return await handle_csv_sql_query(request, db)
-        elif recommended_service == "database":
-            # Safety check: Prevent database routing when CSV file is selected
-            if request.file_id:
-                logger.warning("🤖 AI recommended database service for CSV file - overriding to CSV to SQL converter")
-                logger.info("🤖 Routing to CSV to SQL converter instead")
-                return await handle_csv_sql_query(request, db)
-            else:
-                logger.info("🤖 AI routing to database analysis")
-                return await handle_database_query(request, db)
         else:
             # Fallback to CSV to SQL converter for unknown recommendations
             logger.warning(f"🤖 Unknown AI recommendation: {recommended_service}, falling back to CSV to SQL converter")
@@ -269,8 +254,8 @@ async def handle_csv_sql_query(request: QueryRequest, db: Session) -> QueryRespo
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["error"])
         
-        # Format the answer
-        answer = format_agent_result(result["data"])
+        # Generate natural language response using TextToSQLService
+        answer = text_to_sql.generate_natural_response(request.question, sql_query, result["data"])
         
         return QueryResponse(
             answer=answer,
@@ -291,6 +276,9 @@ async def handle_database_query(request: QueryRequest, db: Session) -> QueryResp
     """
     Handle database-based queries using the existing agent system.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if not request.connection_id:
         raise HTTPException(status_code=400, detail="connection_id is required for database queries")
     
@@ -356,15 +344,18 @@ async def handle_database_query(request: QueryRequest, db: Session) -> QueryResp
     columns = agent_response.get("columns", [])
     row_count = agent_response.get("row_count", 0)
     
-    # 5. Create a human-readable answer for simple queries
-    if len(raw_data) == 1 and len(raw_data[0]) == 1:
-        # Single value result
-        final_answer = f"The result is: {raw_data[0][0]}"
-    elif row_count > 0:
-        # Multiple rows result - show count
-        final_answer = f"Query returned {row_count} rows. Showing results in table below."
-    else:
-        final_answer = "The query returned no results."
+    # 5. Generate natural language response using TextToSQLService
+    try:
+        final_answer = sql_service.generate_natural_response(request.question, generated_sql, raw_data)
+    except Exception as e:
+        logger.warning(f"Failed to generate natural response: {e}")
+        # Fallback to simple response
+        if len(raw_data) == 1 and len(raw_data[0]) == 1:
+            final_answer = f"The result is: {raw_data[0][0]}"
+        elif row_count > 0:
+            final_answer = f"Query returned {row_count} rows. Showing results in table below."
+        else:
+            final_answer = "The query returned no results."
 
     # 6. Return the structured response to the user
     return QueryResponse(

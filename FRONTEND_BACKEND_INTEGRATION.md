@@ -131,8 +131,37 @@ DEBUG=false
 - ✅ `GET /api/v1/connections/{id}/status` - Connection status
 
 ### **Query Endpoints**
-- ✅ `POST /api/v1/query` - Natural language queries
+- ✅ `POST /api/v1/query` - Natural language queries with AI routing
+- ✅ `data_source: 'auto'` - AI-powered service selection
+- ✅ `data_source: 'csv'` - Pandas data analysis
+- ✅ `data_source: 'csv_sql'` - SQL queries on CSV data
+- ✅ `data_source: 'database'` - Real-time database queries
+- ✅ `user_preference: 'sql' | 'python'` - User preference for AI routing
 - ✅ WebSocket support for real-time updates
+
+## 🤖 **AI Routing Integration**
+
+### **Frontend AI Routing Components**
+- ✅ `DataSourceSelector` - Choose between auto, csv, csv_sql, database
+- ✅ `UserPreferenceSelector` - Set SQL/Python preference for AI routing
+- ✅ `ServiceExplanation` - Display AI reasoning and confidence
+- ✅ Real-time AI routing status indicators
+
+### **Backend AI Routing Service**
+- ✅ `AIRoutingAgent` - LLM-powered service selection
+- ✅ Context-aware routing (CSV vs Database)
+- ✅ Service isolation (CSV files never route to database)
+- ✅ User preference consideration
+- ✅ Confidence scoring and reasoning
+
+### **AI Routing Flow**
+1. **User Selection**: User chooses "AI Auto-Select" data source
+2. **Preference Setting**: Optional SQL/Python preference
+3. **Question Input**: User asks natural language question
+4. **AI Analysis**: Backend AI agent analyzes question and context
+5. **Service Selection**: AI chooses optimal service with reasoning
+6. **Execution**: Selected service processes the query
+7. **Response**: Results returned with AI routing explanation
 
 ## 🔄 **Real-time Communication**
 

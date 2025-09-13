@@ -14,9 +14,8 @@ logger = logging.getLogger(__name__)
 
 class RecommendedService(Enum):
     """Recommended services for different analysis types."""
-    CSV_SQL = "csv_sql"           # SQL queries on CSV data
-    CSV_PANDAS = "csv"            # Pandas operations on CSV data
-    DATABASE = "database"         # External database queries
+    CSV_SQL = "csv_to_sql_converter"    # SQL queries on CSV data
+    CSV_PANDAS = "data_analysis_service" # Pandas operations on CSV data
 
 @dataclass
 class AnalysisContext:
@@ -29,10 +28,14 @@ class AnalysisContext:
 
 class AIRoutingAgent:
     """
-    Real AI Agent powered by LLM that intelligently routes data analysis requests.
+    Real AI Agent powered by LLM that intelligently routes CSV data analysis requests.
     
     This agent uses OpenAI's GPT models to understand the user's question and context,
-    then makes intelligent decisions about which service to use for optimal results.
+    then makes intelligent decisions between csv_to_sql_converter and data_analysis_service
+    for optimal CSV data analysis results.
+    
+    Note: This agent only handles CSV data routing. Database queries are handled directly
+    by agent-postgresql without AI routing.
     """
     
     def __init__(self):
@@ -81,10 +84,18 @@ class AIRoutingAgent:
             
         except Exception as e:
             self.logger.error(f"Error in AI routing: {e}")
-            # Fallback to safe default
+            # Smart fallback based on question complexity
+            question_lower = question.lower()
+            if any(keyword in question_lower for keyword in ['correlation', 'trend', 'analysis', 'regression', 'statistical', 'machine learning', 'ml']):
+                fallback_service = "data_analysis_service"
+                fallback_reasoning = "Complex analysis detected, using pandas service"
+            else:
+                fallback_service = "csv_to_sql_converter"
+                fallback_reasoning = "Simple query detected, using SQL service"
+            
             return {
-                "recommended_service": "csv_to_sql_converter",
-                "reasoning": f"AI routing failed: {str(e)}. Using safe default.",
+                "recommended_service": fallback_service,
+                "reasoning": f"AI routing failed: {str(e)}. {fallback_reasoning}.",
                 "confidence": 0.3,
                 "ai_analysis": "Error occurred during AI analysis",
                 "context": {
@@ -100,7 +111,11 @@ class AIRoutingAgent:
         # Context information
         context_info = []
         if context.file_size:
-            context_info.append(f"File size: {context.file_size / (1024*1024):.1f}MB")
+            try:
+                file_size_mb = float(context.file_size) / (1024*1024)
+                context_info.append(f"File size: {file_size_mb:.1f}MB")
+            except (ValueError, TypeError):
+                context_info.append(f"File size: {context.file_size} bytes")
         if context.data_source:
             context_info.append(f"Data source: {context.data_source}")
         if context.user_preference:
@@ -108,54 +123,27 @@ class AIRoutingAgent:
         
         context_str = "\n".join(context_info) if context_info else "No additional context"
         
-        # Determine available services based on context
-        if context.data_source == "csv":
-            # CSV file selected - only choose between CSV services
-            available_services = """AVAILABLE SERVICES (CSV FILE SELECTED):
+        # AI routing agent only handles CSV data - choose between CSV services
+        available_services = """AVAILABLE SERVICES (CSV DATA ONLY):
 1. csv_to_sql_converter: SQL queries on CSV data (fast, familiar SQL syntax, good for simple queries)
 2. data_analysis_service: Pandas operations on CSV data (powerful, good for complex statistical analysis and data transformation)
 
-IMPORTANT: You can ONLY choose between csv_to_sql_converter and data_analysis_service. Do NOT recommend database service."""
-            
-            analysis_guidelines = """ANALYSIS GUIDELINES (CSV FILE CONTEXT):
+IMPORTANT: You can ONLY choose between csv_to_sql_converter and data_analysis_service."""
+        
+        analysis_guidelines = """ANALYSIS GUIDELINES (CSV DATA CONTEXT):
 - For simple queries (SELECT, WHERE, GROUP BY, COUNT, SUM, AVG): recommend csv_to_sql_converter
 - For complex statistical analysis (correlation, regression, ML, clustering): recommend data_analysis_service
 - For data transformation (pivot, reshape, merge, clean): recommend data_analysis_service
 - For large CSV files (>100MB): prefer data_analysis_service over csv_to_sql_converter for complex operations
 - For user preferences: respect sql preference → csv_to_sql_converter, python preference → data_analysis_service
-- For ambiguous cases: choose csv_to_sql_converter for simplicity
-- NEVER recommend database service when CSV file is selected"""
-            
-            response_format = """RESPONSE FORMAT (JSON only):
+- For ambiguous cases: choose csv_to_sql_converter for simplicity"""
+        
+        response_format = """RESPONSE FORMAT (JSON only):
 {{
     "recommended_service": "csv_to_sql_converter|data_analysis_service",
     "reasoning": "Brief explanation of why this service was chosen",
     "confidence": 0.85,
     "analysis_type": "simple_query|complex_statistical|data_transformation|large_dataset",
-    "key_factors": ["factor1", "factor2", "factor3"]
-}}"""
-        else:
-            # Database context - can choose all services
-            available_services = """AVAILABLE SERVICES (DATABASE CONTEXT):
-1. csv_to_sql_converter: SQL queries on CSV data (fast, familiar SQL syntax, good for simple queries)
-2. data_analysis_service: Pandas operations on CSV data (powerful, good for complex statistical analysis and data transformation)
-3. database: External database queries (real-time data, large datasets, production data)"""
-            
-            analysis_guidelines = """ANALYSIS GUIDELINES (DATABASE CONTEXT):
-- For simple queries (SELECT, WHERE, GROUP BY, COUNT, SUM, AVG): recommend csv_to_sql_converter
-- For complex statistical analysis (correlation, regression, ML, clustering): recommend data_analysis_service
-- For data transformation (pivot, reshape, merge, clean): recommend data_analysis_service
-- For real-time data queries: recommend database
-- For large datasets (>100MB): prefer data_analysis_service or database over csv_to_sql_converter
-- For user preferences: respect sql preference → csv_to_sql_converter, python preference → data_analysis_service
-- For ambiguous cases: choose csv_to_sql_converter for simplicity"""
-            
-            response_format = """RESPONSE FORMAT (JSON only):
-{{
-    "recommended_service": "csv_to_sql_converter|data_analysis_service|database",
-    "reasoning": "Brief explanation of why this service was chosen",
-    "confidence": 0.85,
-    "analysis_type": "simple_query|complex_statistical|data_transformation|real_time|large_dataset",
     "key_factors": ["factor1", "factor2", "factor3"]
 }}"""
         
@@ -193,13 +181,8 @@ Respond with ONLY the JSON, no other text:"""
             # Validate the response
             recommended_service = ai_data.get("recommended_service", "csv_to_sql_converter")
             
-            # Additional validation: Prevent database recommendation when CSV file is selected
-            if context.data_source == "csv" and recommended_service == "database":
-                self.logger.warning("AI recommended database service for CSV file - overriding to csv_to_sql_converter")
-                recommended_service = "csv_to_sql_converter"
-            
-            # Validate service is in allowed list
-            if recommended_service not in ["csv_to_sql_converter", "data_analysis_service", "database"]:
+            # Validate service is in allowed list (only CSV services)
+            if recommended_service not in ["csv_to_sql_converter", "data_analysis_service"]:
                 recommended_service = "csv_to_sql_converter"  # Safe default
             
             return {
@@ -237,7 +220,7 @@ Respond with ONLY the JSON, no other text:"""
                                        data_source: Optional[str] = None, 
                                        user_preference: Optional[str] = None) -> str:
         """
-        Get a simple service recommendation for the question.
+        Get a simple service recommendation for CSV data analysis.
         
         Args:
             question: The user's question
@@ -246,7 +229,7 @@ Respond with ONLY the JSON, no other text:"""
             user_preference: Optional user preference ("sql" or "python")
             
         Returns:
-            Recommended service name ("csv_sql", "csv", or "database")
+            Recommended service name ("csv_to_sql_converter" or "data_analysis_service")
         """
         context = AnalysisContext(
             question=question,

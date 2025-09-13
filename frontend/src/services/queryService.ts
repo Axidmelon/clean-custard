@@ -58,8 +58,37 @@ const askDatabaseQuestion = async (connectionId: string, question: string): Prom
   return askQuestion(queryData);
 };
 
+// AI routing query function
+const askAIQuestion = async (
+  fileId: string, 
+  question: string, 
+  userPreference?: 'sql' | 'python'
+): Promise<QueryResponse> => {
+  const queryData: QueryRequest = {
+    file_id: fileId,
+    question: question,
+    data_source: 'auto',
+    user_preference: userPreference
+  };
+  
+  return askQuestion(queryData);
+};
+
+// CSV SQL query function
+const askCSVSQLQuestion = async (fileId: string, question: string): Promise<QueryResponse> => {
+  const queryData: QueryRequest = {
+    file_id: fileId,
+    question: question,
+    data_source: 'csv_sql'
+  };
+  
+  return askQuestion(queryData);
+};
+
 export const queryService = {
   askQuestion,
   askDataAnalysisQuestion,
-  askDatabaseQuestion
+  askDatabaseQuestion,
+  askAIQuestion,        // NEW: AI-powered routing
+  askCSVSQLQuestion     // NEW: CSV to SQL converter
 };

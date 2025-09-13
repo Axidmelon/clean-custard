@@ -3,6 +3,128 @@
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from core.config import settings
+from typing import Any, Union
+
+
+class ResultFormatter:
+    """
+    Utility class for detecting and formatting different result types.
+    Handles both string and numeric results with appropriate formatting.
+    """
+    
+    @staticmethod
+    def detect_result_type(result_value: Any) -> str:
+        """
+        Detect the type of result value.
+        
+        Args:
+            result_value: The result value to analyze
+            
+        Returns:
+            String indicating the type: 'number', 'string', 'list', 'other'
+        """
+        if isinstance(result_value, (int, float)):
+            return "number"
+        elif isinstance(result_value, str):
+            return "string"
+        elif isinstance(result_value, list):
+            return "list"
+        else:
+            return "other"
+    
+    @staticmethod
+    def format_result_by_type(result_value: Any, question: str) -> str:
+        """
+        Format result value based on its type and question context.
+        
+        Args:
+            result_value: The result value to format
+            question: The original user question for context
+            
+        Returns:
+            Formatted string representation of the result
+        """
+        result_type = ResultFormatter.detect_result_type(result_value)
+        question_lower = question.lower()
+        
+        if result_type == "number":
+            return ResultFormatter._format_number(result_value, question_lower)
+        elif result_type == "string":
+            return ResultFormatter._format_string(result_value, question_lower)
+        elif result_type == "list":
+            return ResultFormatter._format_list(result_value, question_lower)
+        else:
+            return str(result_value)
+    
+    @staticmethod
+    def _format_number(value: Union[int, float], question_lower: str) -> str:
+        """Format numeric values with appropriate formatting."""
+        if isinstance(value, float):
+            if "revenue" in question_lower or "total" in question_lower:
+                return f"${value:,.2f}"
+            elif "average" in question_lower or "mean" in question_lower:
+                return f"${value:.2f}"
+            else:
+                return f"{value:.2f}"
+        else:  # integer
+            if "revenue" in question_lower or "total" in question_lower:
+                return f"${value:,}"
+            elif "count" in question_lower or "number" in question_lower:
+                return f"{value:,}"
+            else:
+                return f"{value:,}"
+    
+    @staticmethod
+    def _format_string(value: str, question_lower: str) -> str:
+        """Format string values with appropriate context."""
+        # Clean up the string value
+        cleaned_value = value.strip()
+        
+        # Return clean string without quotes for natural language responses
+        return cleaned_value
+    
+    @staticmethod
+    def _format_list(value: list, question_lower: str) -> str:
+        """Format list values with appropriate context."""
+        if len(value) <= 3:
+            return f"[{', '.join(map(str, value))}]"
+        else:
+            return f"[{', '.join(map(str, value[:3]))}, ...] ({len(value)} total)"
+    
+    @staticmethod
+    def generate_contextual_response(question: str, result_value: Any) -> str:
+        """
+        Generate a contextual response based on question and result type.
+        
+        Args:
+            question: The original user question
+            result_value: The result value
+            
+        Returns:
+            Natural language response
+        """
+        formatted_value = ResultFormatter.format_result_by_type(result_value, question)
+        question_lower = question.lower()
+        
+        # Generate contextual responses based on question patterns
+        if "revenue" in question_lower and ("total" in question_lower or "sum" in question_lower):
+            return f"The total revenue is {formatted_value}"
+        elif "average" in question_lower or "mean" in question_lower:
+            return f"The average value is {formatted_value}"
+        elif "how many" in question_lower or ("count" in question_lower and "number" in question_lower):
+            return f"The count is {formatted_value}"
+        elif "which state" in question_lower or "which country" in question_lower:
+            return f"The state with the highest consumers is {formatted_value}"
+        elif "which product" in question_lower:
+            return f"The product with the highest sales is {formatted_value}"
+        elif "which customer" in question_lower or "which user" in question_lower:
+            return f"The customer with the most orders is {formatted_value}"
+        elif "top" in question_lower and "product" in question_lower:
+            return f"Here are the top products: {formatted_value}"
+        elif "top" in question_lower:
+            return f"Here are the top results: {formatted_value}"
+        else:
+            return f"The result is {formatted_value}"
 
 
 # We are creating a 'class' here. Think of it as a blueprint
@@ -76,3 +198,72 @@ SQL Query:
         print(f"Generated SQL: {generated_sql}")
 
         return generated_sql
+    
+    def generate_natural_response(self, question: str, sql_query: str, query_result: list) -> str:
+        """
+        Generate a natural language response from the SQL query result.
+        
+        Args:
+            question: The original user question
+            sql_query: The SQL query that was executed
+            query_result: The result from executing the SQL query
+            
+        Returns:
+            A natural language response explaining the result
+        """
+        print(f"Generating natural response for question: '{question}'")
+        
+        # Handle empty results
+        if not query_result or not query_result[0]:
+            return "The query returned no results."
+        
+        # Extract the result value
+        result_value = query_result[0][0]
+        
+        # Use ResultFormatter for type-safe formatting
+        try:
+            # First try using the ResultFormatter for immediate contextual response
+            contextual_response = ResultFormatter.generate_contextual_response(question, result_value)
+            
+            # If we have a simple single-value result, use the contextual response
+            if len(query_result) == 1 and len(query_result[0]) == 1:
+                print(f"Generated contextual response: {contextual_response}")
+                return contextual_response
+            
+            # For complex results, use LLM with proper formatting
+            formatted_value = ResultFormatter.format_result_by_type(result_value, question)
+            
+            response_prompt = f"""
+You are an expert data analyst who explains query results in natural, conversational language.
+
+User's Question: {question}
+SQL Query Executed: {sql_query}
+Query Result: {formatted_value}
+Result Type: {ResultFormatter.detect_result_type(result_value)}
+
+Generate a natural, contextual response that directly answers the user's question using the result.
+Make it sound conversational and informative.
+
+Examples:
+- "What is the total revenue?" with result $1,234,567 → "The total revenue is $1,234,567"
+- "How many customers do we have?" with result 42 → "We have 42 customers"
+- "What's the average order value?" with result $99.99 → "The average order value is $99.99"
+- "Which state has the highest consumers?" with result "California" → "The state with the highest consumers is California"
+
+Response:"""
+            
+            # Use the LLM to generate a natural response
+            response = self.llm.invoke(response_prompt)
+            natural_response = response.content.strip()
+            
+            print(f"Generated natural response: {natural_response}")
+            return natural_response
+            
+        except Exception as e:
+            print(f"Error generating natural response: {e}")
+            # Fallback to contextual response
+            try:
+                return ResultFormatter.generate_contextual_response(question, result_value)
+            except Exception as fallback_error:
+                print(f"Fallback error: {fallback_error}")
+                return f"The result is: {result_value}"

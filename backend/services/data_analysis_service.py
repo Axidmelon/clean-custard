@@ -15,6 +15,7 @@ import re
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from core.config import settings
+from llm.services import ResultFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -548,7 +549,7 @@ PANDAS CODE:
     
     def _generate_natural_response(self, result: Any, question: str) -> str:
         """
-        Generate natural language response from query result.
+        Generate natural language response from query result using LLM and ResultFormatter.
         
         Args:
             result: Query execution result
@@ -556,6 +557,130 @@ PANDAS CODE:
             
         Returns:
             Natural language response
+        """
+        try:
+            # Handle different result types
+            if isinstance(result, pd.DataFrame):
+                if len(result) == 1 and len(result.columns) == 1:
+                    # Single value result - use ResultFormatter
+                    result_value = result.iloc[0, 0]
+                    return ResultFormatter.generate_contextual_response(question, result_value)
+                else:
+                    # Multiple rows - use LLM with formatted summary
+                    result_summary = self._prepare_result_summary(result)
+                    return self._generate_llm_response(question, result_summary)
+            
+            elif isinstance(result, pd.Series):
+                if len(result) == 1:
+                    # Single value result - use ResultFormatter
+                    result_value = result.iloc[0]
+                    return ResultFormatter.generate_contextual_response(question, result_value)
+                else:
+                    # Multiple values - use LLM with formatted summary
+                    result_summary = self._prepare_result_summary(result)
+                    return self._generate_llm_response(question, result_summary)
+            
+            elif isinstance(result, (int, float, str)):
+                # Single value - use ResultFormatter
+                return ResultFormatter.generate_contextual_response(question, result)
+            
+            else:
+                # Complex result - use LLM
+                result_summary = self._prepare_result_summary(result)
+                return self._generate_llm_response(question, result_summary)
+            
+        except Exception as e:
+            logger.error(f"Error generating natural response: {e}")
+            # Fallback to simple response
+            return self._generate_fallback_response(result)
+    
+    def _generate_llm_response(self, question: str, result_summary: str) -> str:
+        """
+        Generate LLM response for complex results.
+        
+        Args:
+            question: Original question
+            result_summary: Formatted result summary
+            
+        Returns:
+            Natural language response
+        """
+        try:
+            response_prompt = f"""
+You are an expert data analyst who explains query results in natural, conversational language.
+
+User's Question: {question}
+Query Result: {result_summary}
+
+Generate a natural, contextual response that directly answers the user's question using the result.
+Make it sound conversational and informative.
+
+Examples:
+- "What is the total revenue?" with result 1234567 → "The total revenue is $1,234,567"
+- "How many customers do we have?" with result 42 → "We have 42 customers"
+- "What's the average order value?" with result 99.99 → "The average order value is $99.99"
+- "Show me the top 5 products" with multiple results → "Here are the top 5 products: [list]"
+- "Which state has the highest consumers?" with result "California" → "The state with the highest consumers is California"
+
+Response:"""
+            
+            # Use LLM to generate natural response
+            response = self.llm.invoke(response_prompt)
+            natural_response = response.content.strip()
+            
+            logger.info(f"Generated LLM response: {natural_response}")
+            return natural_response
+            
+        except Exception as e:
+            logger.error(f"Error generating LLM response: {e}")
+            return f"Query completed successfully. Result: {result_summary}"
+    
+    def _prepare_result_summary(self, result: Any) -> str:
+        """
+        Prepare a summary of the result for LLM processing.
+        
+        Args:
+            result: Query execution result
+            
+        Returns:
+            String summary of the result
+        """
+        try:
+            if isinstance(result, pd.DataFrame):
+                if len(result) == 1 and len(result.columns) == 1:
+                    return str(result.iloc[0, 0])
+                elif len(result) <= 5:
+                    return f"DataFrame with {len(result)} rows: {result.to_dict('records')}"
+                else:
+                    return f"DataFrame with {len(result)} rows (showing first 3): {result.head(3).to_dict('records')}"
+            
+            elif isinstance(result, pd.Series):
+                if len(result) == 1:
+                    return str(result.iloc[0])
+                elif len(result) <= 5:
+                    return f"Series with {len(result)} values: {result.to_dict()}"
+                else:
+                    return f"Series with {len(result)} values (showing first 3): {result.head(3).to_dict()}"
+            
+            elif isinstance(result, (int, float, str)):
+                return str(result)
+            
+            else:
+                return str(result)
+                
+        except Exception as e:
+            logger.error(f"Error preparing result summary: {e}")
+            return str(result)
+    
+    def _generate_fallback_response(self, result: Any) -> str:
+        """
+        Generate a fallback response when LLM generation fails.
+        
+        Args:
+            result: Query execution result
+            
+        Returns:
+            Simple fallback response
         """
         try:
             if isinstance(result, pd.DataFrame):
@@ -581,7 +706,7 @@ PANDAS CODE:
                 return f"Query completed successfully. Result: {str(result)}"
                 
         except Exception as e:
-            logger.error(f"Error generating natural response: {e}")
+            logger.error(f"Error generating fallback response: {e}")
             return "Query completed successfully."
     
     def _is_valid_csv_content(self, content: str) -> bool:

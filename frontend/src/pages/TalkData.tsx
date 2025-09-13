@@ -12,6 +12,9 @@ import { signedUrlService } from "@/services/signedUrlService";
 import { SimpleChatEditor } from "@/components/blocknote/SimpleChatEditor";
 import { SimpleDataTable } from "@/components/blocknote/SimpleDataTable";
 import { RichTextDisplay } from "@/components/ui/RichTextDisplay";
+import DataSourceSelector from "@/components/DataSourceSelector";
+import UserPreferenceSelector from "@/components/UserPreferenceSelector";
+import ServiceExplanation from "@/components/ServiceExplanation";
 // import { APP_CONFIG } from "@/lib/constants";
 
 // Constants for CSV loading optimization
@@ -63,6 +66,17 @@ export default function TalkData() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  
+  // NEW: AI Routing state
+  const [dataSource, setDataSource] = useState<'auto' | 'database' | 'csv' | 'csv_sql'>('auto');
+  const [userPreference, setUserPreference] = useState<'sql' | 'python' | undefined>(undefined);
+  const [aiRouting, setAiRouting] = useState<{
+    service_used: string;
+    reasoning: string;
+    confidence: number;
+  } | undefined>(undefined);
+  const [isAIRouting, setIsAIRouting] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -478,8 +492,46 @@ export default function TalkData() {
       let response: QueryResponse;
       
       // Determine data source and make appropriate API call
-      if (selectedCsvFileId) {
-        // Validate that the selected file exists and is completed
+      if (dataSource === 'auto') {
+        // AI routing - requires either file or connection
+        if (selectedCsvFileId) {
+          const selectedFile = uploadedFiles.find(file => file.id === selectedCsvFileId);
+          if (!selectedFile) {
+            throw new Error("Selected file not found. Please select a valid file.");
+          }
+          if (selectedFile.status !== 'completed') {
+            throw new Error("File upload is still in progress. Please wait for it to complete.");
+          }
+          
+          console.log('🤖 AI routing query for file:', {
+            fileId: selectedCsvFileId,
+            filename: selectedFile.name,
+            userPreference
+          });
+          
+          setIsAIRouting(true);
+          response = await queryService.askAIQuestion(selectedCsvFileId, userMessage.content, userPreference);
+        } else if (selectedConnectionId) {
+          console.log('🤖 AI routing query for database:', {
+            connectionId: selectedConnectionId,
+            userPreference
+          });
+          
+          setIsAIRouting(true);
+          // For database queries with AI routing, we need to create a custom request
+          // that includes both connection_id and data_source: 'auto'
+          const queryData = {
+            connection_id: selectedConnectionId,
+            question: userMessage.content,
+            data_source: 'auto' as const,
+            user_preference: userPreference
+          };
+          response = await queryService.askQuestion(queryData);
+        } else {
+          throw new Error("No data source selected for AI routing");
+        }
+      } else if (dataSource === 'csv' && selectedCsvFileId) {
+        // Data analysis query
         const selectedFile = uploadedFiles.find(file => file.id === selectedCsvFileId);
         if (!selectedFile) {
           throw new Error("Selected file not found. Please select a valid file.");
@@ -488,16 +540,34 @@ export default function TalkData() {
           throw new Error("File upload is still in progress. Please wait for it to complete.");
         }
         
-        console.log('🔍 Processing query for file:', {
+        console.log('📊 Data analysis query for file:', {
           fileId: selectedCsvFileId,
-          filename: selectedFile.name,
-          status: selectedFile.status
+          filename: selectedFile.name
         });
         
-        // Data analysis query
         response = await queryService.askDataAnalysisQuestion(selectedCsvFileId, userMessage.content);
-      } else if (selectedConnectionId) {
+      } else if (dataSource === 'csv_sql' && selectedCsvFileId) {
+        // CSV SQL query
+        const selectedFile = uploadedFiles.find(file => file.id === selectedCsvFileId);
+        if (!selectedFile) {
+          throw new Error("Selected file not found. Please select a valid file.");
+        }
+        if (selectedFile.status !== 'completed') {
+          throw new Error("File upload is still in progress. Please wait for it to complete.");
+        }
+        
+        console.log('🗃️ CSV SQL query for file:', {
+          fileId: selectedCsvFileId,
+          filename: selectedFile.name
+        });
+        
+        response = await queryService.askCSVSQLQuestion(selectedCsvFileId, userMessage.content);
+      } else if (dataSource === 'database' && selectedConnectionId) {
         // Database query
+        console.log('🗄️ Database query for connection:', {
+          connectionId: selectedConnectionId
+        });
+        
         response = await queryService.askDatabaseQuestion(selectedConnectionId, userMessage.content);
         
         // Mark agent as connected on successful query
@@ -506,7 +576,12 @@ export default function TalkData() {
           [selectedConnectionId]: true
         }));
       } else {
-        throw new Error("No data source selected");
+        throw new Error("No data source selected or invalid data source configuration");
+      }
+      
+      // Store AI routing information if available
+      if (response.ai_routing) {
+        setAiRouting(response.ai_routing);
       }
       
       const assistantMessage: Message = {
@@ -530,6 +605,10 @@ export default function TalkData() {
     } catch (error) {
       const errorType = getErrorType(error);
       const errorContent = getErrorMessage(error, errorType);
+      
+      // Reset AI routing state on error
+      setIsAIRouting(false);
+      setAiRouting(undefined);
       
       // Update agent status based on error type
       if (errorType === 'agent_disconnected') {
@@ -558,6 +637,7 @@ export default function TalkData() {
       }
     } finally {
       setIsLoading(false);
+      setIsAIRouting(false);
     }
   };
 
@@ -666,6 +746,35 @@ export default function TalkData() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <div className="mb-4 px-2">
+        {/* Data Source Selection */}
+        <div className="mb-4">
+          <DataSourceSelector
+            value={dataSource}
+            onChange={(value) => setDataSource(value as 'auto' | 'database' | 'csv' | 'csv_sql')}
+            hasFile={!!selectedCsvFileId}
+            hasConnection={!!selectedConnectionId}
+            disabled={isLoading}
+          />
+        </div>
+        
+        {/* User Preference Selector (only for AI mode) */}
+        {dataSource === 'auto' && (
+          <div className="mb-4">
+            <UserPreferenceSelector
+              value={userPreference}
+              onChange={setUserPreference}
+              disabled={isLoading}
+            />
+          </div>
+        )}
+        
+        {/* Service Explanation */}
+        {(aiRouting || isAIRouting) && (
+          <div className="mb-4">
+            <ServiceExplanation aiRouting={aiRouting} isLoading={isAIRouting} />
+          </div>
+        )}
+        
         {/* Connection and CSV File Selection */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {/* CSV File Selection */}
