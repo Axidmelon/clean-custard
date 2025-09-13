@@ -18,11 +18,11 @@ SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 if not SQLALCHEMY_DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 
-# Database connection pool settings - optimized for Supabase Nano tier
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))  # Reduced from 15 to 10 for Supabase Nano
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))  # Reduced from 10 to 5
-DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))  # Increased from 10 to 30 for better reliability
-DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # 30 minutes
+# Database connection pool settings - optimized for Supabase production
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "8"))  # Reduced for Supabase Nano tier stability
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "3"))  # Conservative overflow for Nano tier
+DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "60"))  # Increased timeout for better reliability
+DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # 1 hour recycle for stability
 DB_POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
 
 # Create engine with connection pooling
@@ -32,7 +32,7 @@ if "postgresql" in SQLALCHEMY_DATABASE_URL:
         "sslmode": "require",
         "options": "-c default_transaction_isolation=read_committed",
         "application_name": "custard-backend",
-        "connect_timeout": 30,  # Increased from 10 to 30 seconds
+        "connect_timeout": 60,  # Increased to 60 seconds for better reliability
     })
 
 # Set isolation level based on database type

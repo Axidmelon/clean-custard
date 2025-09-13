@@ -19,6 +19,7 @@ interface FileUploadContextType {
   updateFileStatus: (fileId: string, status: 'progress' | 'completed' | 'failed', progress?: number) => void;
   removeUploadedFile: (fileId: string) => void;
   clearAllFiles: () => void;
+  refreshUploadedFiles: () => Promise<void>;
 }
 
 const FileUploadContext = createContext<FileUploadContextType | undefined>(undefined);
@@ -43,14 +44,36 @@ export const FileUploadProvider: React.FC<FileUploadProviderProps> = ({ children
   useEffect(() => {
     const loadUploadedFiles = async () => {
       try {
+        console.log('🔄 Loading uploaded files from backend...');
         const response = await fileUploadService.getUploadedFiles();
         if (response.success) {
           const files = fileUploadService.convertFileListToUploadedFiles(response.files);
           setUploadedFiles(files);
+          console.log(`✅ Loaded ${files.length} uploaded files`);
+        } else {
+          console.warn('⚠️ Failed to load uploaded files: response not successful');
         }
       } catch (error) {
-        console.error('Failed to load uploaded files:', error);
-        // Don't show error to user, just log it
+        console.error('❌ Failed to load uploaded files:', error);
+        
+        // Check if it's an authentication error
+        if (error instanceof Error && (
+          error.message.includes('Authentication required') || 
+          error.message.includes('401') ||
+          error.message.includes('Unauthorized')
+        )) {
+          console.log('🔐 Authentication required - user may need to log in again');
+          // Don't show error to user for auth issues, they'll be redirected to login
+          // Clear any stale auth data
+          try {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+          } catch (storageError) {
+            console.warn('Failed to clear auth data:', storageError);
+          }
+        } else {
+          console.warn('⚠️ Non-auth error loading files, continuing without file list');
+        }
       } finally {
         setIsLoading(false);
       }
@@ -86,14 +109,14 @@ export const FileUploadProvider: React.FC<FileUploadProviderProps> = ({ children
       
       // Update file with backend response
       const uploadedFile: UploadedFile = {
-        id: response.file_info.file_id,
+        id: response.file_info.id, // Use 'id' instead of 'file_id' to match backend response
         name: response.file_info.original_filename,
         size: response.file_info.file_size,
-        uploadDate: new Date(response.file_info.upload_date).toLocaleDateString('en-GB', {
+        uploadDate: new Date(response.file_info.created_at).toLocaleDateString('en-GB', {
           day: '2-digit',
           month: 'long',
           year: 'numeric'
-        }) + ' | ' + new Date(response.file_info.upload_date).toLocaleTimeString('en-US', {
+        }) + ' | ' + new Date(response.file_info.created_at).toLocaleTimeString('en-US', {
           hour: '2-digit',
           minute: '2-digit',
           hour12: true
@@ -109,6 +132,12 @@ export const FileUploadProvider: React.FC<FileUploadProviderProps> = ({ children
         f.id === tempFile.id ? uploadedFile : f
       ));
 
+      console.log('✅ File upload completed successfully:', {
+        tempId: tempFile.id,
+        realId: uploadedFile.id,
+        filename: uploadedFile.name
+      });
+
       return uploadedFile.id;
     } catch (error) {
       // Update file status to failed
@@ -116,7 +145,7 @@ export const FileUploadProvider: React.FC<FileUploadProviderProps> = ({ children
         f.id === tempFile.id ? { ...f, status: 'failed' as const } : f
       ));
       
-      console.error('File upload failed:', error);
+      console.error('❌ File upload failed:', error);
       throw error;
     }
   };
@@ -145,13 +174,31 @@ export const FileUploadProvider: React.FC<FileUploadProviderProps> = ({ children
     setUploadedFiles([]);
   };
 
+  const refreshUploadedFiles = async () => {
+    try {
+      console.log('🔄 Refreshing uploaded files...');
+      const response = await fileUploadService.getUploadedFiles();
+      if (response.success) {
+        const files = fileUploadService.convertFileListToUploadedFiles(response.files);
+        setUploadedFiles(files);
+        console.log(`✅ Refreshed ${files.length} uploaded files`);
+      } else {
+        console.warn('⚠️ Failed to refresh uploaded files: response not successful');
+      }
+    } catch (error) {
+      console.error('❌ Failed to refresh uploaded files:', error);
+      throw error;
+    }
+  };
+
   const value: FileUploadContextType = {
     uploadedFiles,
     isLoading,
     addUploadedFile,
     updateFileStatus,
     removeUploadedFile,
-    clearAllFiles
+    clearAllFiles,
+    refreshUploadedFiles
   };
 
   return (

@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import json
 import logging
+import asyncio
 from typing import Dict, List, Any, Optional, Union
 from io import StringIO
 import httpx
@@ -211,7 +212,7 @@ PANDAS CODE:
     
     async def _fetch_file_content(self, file_id: str) -> Optional[str]:
         """
-        Fetch file content from Cloudinary using the file URL.
+        Fetch file content from Cloudinary using the file URL with enhanced error handling.
         
         Args:
             file_id: ID of the uploaded file
@@ -224,33 +225,74 @@ PANDAS CODE:
             from db.database import SessionLocal
             from db.models import UploadedFile
             
-            # Get file info from database
+            logger.info(f"Fetching file content for file_id: {file_id}")
+            
+            # Get file info from database with enhanced error handling
             db = SessionLocal()
             try:
-                uploaded_file = db.query(UploadedFile).filter(
-                    UploadedFile.id == file_id
-                ).first()
+                # Validate file_id format first
+                if not file_id or len(file_id.strip()) == 0:
+                    logger.error("Empty or invalid file_id provided")
+                    return None
+                
+                # Query database with better error handling
+                try:
+                    uploaded_file = db.query(UploadedFile).filter(
+                        UploadedFile.id == file_id
+                    ).first()
+                except Exception as db_error:
+                    logger.error(f"Database query error for file_id {file_id}: {db_error}")
+                    return None
                 
                 if not uploaded_file:
                     logger.error(f"File not found in database: {file_id}")
                     return None
                 
-                # Fetch file content from Cloudinary URL
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(uploaded_file.file_url)
-                    
-                    if response.status_code == 200:
-                        logger.info(f"Successfully fetched file content for file_id: {file_id}")
-                        return response.text
-                    else:
-                        logger.error(f"Failed to fetch file content from Cloudinary: {response.status_code}")
-                        return None
+                logger.info(f"Found file in database: {uploaded_file.original_filename}")
+                
+                # Validate file URL exists
+                if not uploaded_file.file_url:
+                    logger.error(f"File URL is empty for file_id: {file_id}")
+                    return None
+                
+                # Fetch file content from Cloudinary URL with timeout and retry
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            response = await client.get(uploaded_file.file_url)
+                            
+                            if response.status_code == 200:
+                                logger.info(f"Successfully fetched file content for file_id: {file_id}")
+                                return response.text
+                            else:
+                                logger.warning(f"Failed to fetch file content from Cloudinary (attempt {attempt + 1}): {response.status_code}")
+                                if attempt == max_retries - 1:  # Last attempt
+                                    logger.error(f"All attempts failed to fetch file content for file_id: {file_id}")
+                                    return None
+                                # Wait before retry
+                                await asyncio.sleep(1)
+                    except httpx.TimeoutException:
+                        logger.warning(f"Timeout fetching file content (attempt {attempt + 1}) for file_id: {file_id}")
+                        if attempt == max_retries - 1:
+                            logger.error(f"Timeout after all retries for file_id: {file_id}")
+                            return None
+                        await asyncio.sleep(1)
+                    except Exception as fetch_error:
+                        logger.warning(f"Error fetching file content (attempt {attempt + 1}) for file_id {file_id}: {fetch_error}")
+                        if attempt == max_retries - 1:
+                            logger.error(f"Failed to fetch file content after all retries for file_id: {file_id}")
+                            return None
+                        await asyncio.sleep(1)
                         
             finally:
-                db.close()
+                try:
+                    db.close()
+                except Exception as close_error:
+                    logger.error(f"Error closing database session: {close_error}")
                     
         except Exception as e:
-            logger.error(f"Error fetching file content for file_id {file_id}: {e}")
+            logger.error(f"Unexpected error fetching file content for file_id {file_id}: {e}")
             return None
     
     def _analyze_dataframe_schema(self, df: pd.DataFrame) -> Dict[str, Any]:

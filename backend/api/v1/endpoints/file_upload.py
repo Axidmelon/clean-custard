@@ -19,13 +19,20 @@ async def upload_file(
     db: Session = Depends(get_db)
 ):
     """
-    Upload a single file to Cloudinary and save metadata to database
+    Upload a single file to Cloudinary and save metadata to database with atomic transaction
     """
+    uploaded_file = None
+    cloudinary_upload_success = False
+    
     try:
-        # Upload file to Cloudinary
-        file_info = await cloudinary_upload_service.upload_file(file, str(current_user.id))
+        logger.info(f"Starting file upload for user {current_user.id}: {file.filename}")
         
-        # Save file metadata to database
+        # Upload file to Cloudinary first
+        file_info = await cloudinary_upload_service.upload_file(file, str(current_user.id))
+        cloudinary_upload_success = True
+        logger.info(f"File uploaded to Cloudinary successfully: {file_info['original_filename']}")
+        
+        # Create database record with proper error handling
         uploaded_file = UploadedFile(
             original_filename=file_info['original_filename'],
             file_size=str(file_info['file_size']),
@@ -37,11 +44,12 @@ async def upload_file(
             user_id=current_user.id
         )
         
+        # Add to database and commit atomically
         db.add(uploaded_file)
         db.commit()
         db.refresh(uploaded_file)
         
-        logger.info(f"File uploaded successfully: {file_info['original_filename']} by user {current_user.id}")
+        logger.info(f"File uploaded successfully: {file_info['original_filename']} by user {current_user.id}, file_id: {uploaded_file.id}")
         
         return {
             "success": True,
@@ -54,10 +62,31 @@ async def upload_file(
         }
         
     except HTTPException:
+        # Rollback database transaction if HTTPException occurs
+        try:
+            db.rollback()
+            logger.info("Database transaction rolled back due to HTTPException")
+        except Exception as rollback_error:
+            logger.error(f"Error during rollback: {rollback_error}")
         raise
     except Exception as e:
         logger.error(f"Unexpected error during file upload: {e}")
-        db.rollback()
+        
+        # Rollback database transaction
+        try:
+            db.rollback()
+            logger.info("Database transaction rolled back due to unexpected error")
+        except Exception as rollback_error:
+            logger.error(f"Error during rollback: {rollback_error}")
+        
+        # If Cloudinary upload succeeded but database failed, try to clean up Cloudinary
+        if cloudinary_upload_success and uploaded_file and uploaded_file.cloudinary_public_id:
+            try:
+                await cloudinary_upload_service.delete_file(uploaded_file.cloudinary_public_id)
+                logger.info(f"Cleaned up Cloudinary file: {uploaded_file.cloudinary_public_id}")
+            except Exception as cleanup_error:
+                logger.error(f"Failed to cleanup Cloudinary file: {cleanup_error}")
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during file upload"
@@ -241,7 +270,8 @@ async def list_uploaded_files(
         
         # Test database connection first with more robust error handling
         try:
-            db.execute("SELECT 1")
+            from sqlalchemy import text
+            db.execute(text("SELECT 1"))
             logger.debug("Database connection test successful")
         except Exception as db_error:
             logger.error(f"Database connection test failed: {db_error}")
@@ -462,6 +492,124 @@ async def get_signed_url(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while generating signed URL"
         )
+
+@router.get("/metadata/{file_id}")
+async def get_file_metadata(
+    file_id: str,
+    current_user: User = Depends(get_current_user()),
+    db: Session = Depends(get_db)
+):
+    """
+    Get file metadata by ID for frontend state management
+    """
+    try:
+        logger.info(f"Getting file metadata for file_id: {file_id}, user: {current_user.id}")
+        
+        # Find the file in database
+        uploaded_file = db.query(UploadedFile).filter(
+            UploadedFile.id == file_id,
+            UploadedFile.user_id == current_user.id
+        ).first()
+        
+        if not uploaded_file:
+            logger.warning(f"File not found in database: {file_id} for user: {current_user.id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found"
+            )
+        
+        logger.info(f"File metadata retrieved successfully for file_id: {file_id}")
+        
+        return {
+            "success": True,
+            "file_info": {
+                "id": str(uploaded_file.id),
+                "original_filename": uploaded_file.original_filename,
+                "file_size": int(uploaded_file.file_size) if uploaded_file.file_size else 0,
+                "file_path": uploaded_file.file_path,
+                "file_url": uploaded_file.file_url,
+                "content_type": uploaded_file.content_type,
+                "cloudinary_public_id": uploaded_file.cloudinary_public_id,
+                "created_at": uploaded_file.created_at.isoformat(),
+                "updated_at": uploaded_file.updated_at.isoformat() if uploaded_file.updated_at else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error getting file metadata: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while retrieving file metadata"
+        )
+
+@router.get("/validate/{file_id}")
+async def validate_file_exists(
+    file_id: str,
+    current_user: User = Depends(get_current_user()),
+    db: Session = Depends(get_db)
+):
+    """
+    Validate that a file exists and is accessible by the current user
+    """
+    try:
+        logger.info(f"Validating file existence for file_id: {file_id}, user: {current_user.id}")
+        
+        # Find the file in database
+        uploaded_file = db.query(UploadedFile).filter(
+            UploadedFile.id == file_id,
+            UploadedFile.user_id == current_user.id
+        ).first()
+        
+        if not uploaded_file:
+            logger.warning(f"File not found in database: {file_id} for user: {current_user.id}")
+            return {
+                "exists": False,
+                "file_id": file_id,
+                "message": "File not found in database"
+            }
+        
+        # Verify file is accessible via Cloudinary URL
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.head(uploaded_file.file_url)
+                
+                if response.status_code == 200:
+                    logger.info(f"File validation successful for file_id: {file_id}")
+                    return {
+                        "exists": True,
+                        "file_id": file_id,
+                        "file_info": {
+                            "original_filename": uploaded_file.original_filename,
+                            "file_size": uploaded_file.file_size,
+                            "content_type": uploaded_file.content_type,
+                            "created_at": uploaded_file.created_at.isoformat()
+                        },
+                        "message": "File exists and is accessible"
+                    }
+                else:
+                    logger.warning(f"File not accessible via URL: {file_id}, status: {response.status_code}")
+                    return {
+                        "exists": False,
+                        "file_id": file_id,
+                        "message": f"File exists in database but not accessible via URL (status: {response.status_code})"
+                    }
+        except Exception as url_error:
+            logger.error(f"Error checking file URL accessibility: {url_error}")
+            return {
+                "exists": False,
+                "file_id": file_id,
+                "message": f"Error checking file accessibility: {str(url_error)}"
+            }
+                
+    except Exception as e:
+        logger.error(f"Unexpected error validating file: {e}")
+        return {
+            "exists": False,
+            "file_id": file_id,
+            "message": f"Error validating file: {str(e)}"
+        }
 
 @router.get("/content/{file_id}")
 async def get_file_content(

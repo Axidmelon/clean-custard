@@ -5,13 +5,13 @@ export interface FileUploadResponse {
   success: boolean;
   message: string;
   file_info: {
-    file_id: string;
+    id: string; // Changed from file_id to id to match backend response
     original_filename: string;
     file_size: number;
     file_path: string;
     file_url: string;
     content_type: string;
-    upload_date: string;
+    created_at: string; // Changed from upload_date to created_at to match backend response
     user_id: string;
   };
 }
@@ -202,14 +202,14 @@ class FileUploadService {
   // Helper method to convert backend file info to frontend UploadedFile format
   convertToUploadedFile(fileInfo: FileUploadResponse['file_info']): UploadedFile {
     return {
-      id: fileInfo.file_id,
+      id: fileInfo.id, // Use 'id' instead of 'file_id'
       name: fileInfo.original_filename,
       size: fileInfo.file_size,
-      uploadDate: new Date(fileInfo.upload_date).toLocaleDateString('en-GB', {
+      uploadDate: new Date(fileInfo.created_at).toLocaleDateString('en-GB', {
         day: '2-digit',
         month: 'long',
         year: 'numeric'
-      }) + ' | ' + new Date(fileInfo.upload_date).toLocaleTimeString('en-US', {
+      }) + ' | ' + new Date(fileInfo.created_at).toLocaleTimeString('en-US', {
         hour: '2-digit',
         minute: '2-digit',
         hour12: true

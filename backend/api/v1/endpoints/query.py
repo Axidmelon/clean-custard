@@ -60,14 +60,42 @@ async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(
 
 async def handle_data_analysis_query(request: QueryRequest, db: Session) -> QueryResponse:
     """
-    Handle data analysis queries using the data analysis service.
+    Handle data analysis queries using the data analysis service with file validation.
     """
     from services.data_analysis_service import data_analysis_service
+    from db.models import UploadedFile
+    import logging
+    
+    logger = logging.getLogger(__name__)
     
     if not request.file_id:
         raise HTTPException(status_code=400, detail="file_id is required for data analysis queries")
     
     try:
+        logger.info(f"Processing data analysis query for file_id: {request.file_id}")
+        
+        # Validate file exists in database first
+        uploaded_file = db.query(UploadedFile).filter(
+            UploadedFile.id == request.file_id
+        ).first()
+        
+        if not uploaded_file:
+            logger.error(f"File not found in database: {request.file_id}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"File with ID {request.file_id} not found. Please ensure the file was uploaded successfully."
+            )
+        
+        logger.info(f"File found in database: {uploaded_file.original_filename}")
+        
+        # Validate file URL exists
+        if not uploaded_file.file_url:
+            logger.error(f"File URL is empty for file_id: {request.file_id}")
+            raise HTTPException(
+                status_code=400, 
+                detail="File URL is not available. Please re-upload the file."
+            )
+        
         # Process data analysis query
         result = await data_analysis_service.process_query(request.question, request.file_id)
         
@@ -80,7 +108,11 @@ async def handle_data_analysis_query(request: QueryRequest, db: Session) -> Quer
             row_count=result["row_count"]
         )
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
+        logger.error(f"Unexpected error processing data analysis query for file_id {request.file_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process data analysis query: {str(e)}")
 
 async def handle_database_query(request: QueryRequest, db: Session) -> QueryResponse:

@@ -70,7 +70,7 @@ export default function TalkData() {
   const { data: connections, isLoading: connectionsLoading, error: connectionsError } = useConnections();
   
   // Use shared file upload context
-  const { addUploadedFile, uploadedFiles } = useFileUpload();
+  const { addUploadedFile, uploadedFiles, refreshUploadedFiles } = useFileUpload();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -88,6 +88,8 @@ export default function TalkData() {
       setCsvData(null);
     }
   }, [selectedCsvFileId, uploadedFiles]);
+
+  // Note: Removed auto-selection logic - users must manually select files
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -477,6 +479,21 @@ export default function TalkData() {
       
       // Determine data source and make appropriate API call
       if (selectedCsvFileId) {
+        // Validate that the selected file exists and is completed
+        const selectedFile = uploadedFiles.find(file => file.id === selectedCsvFileId);
+        if (!selectedFile) {
+          throw new Error("Selected file not found. Please select a valid file.");
+        }
+        if (selectedFile.status !== 'completed') {
+          throw new Error("File upload is still in progress. Please wait for it to complete.");
+        }
+        
+        console.log('🔍 Processing query for file:', {
+          fileId: selectedCsvFileId,
+          filename: selectedFile.name,
+          status: selectedFile.status
+        });
+        
         // Data analysis query
         response = await queryService.askDataAnalysisQuestion(selectedCsvFileId, userMessage.content);
       } else if (selectedConnectionId) {
@@ -657,27 +674,44 @@ export default function TalkData() {
               <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm font-medium">CSV File:</span>
             </div>
-            <select 
-              value={selectedCsvFileId} 
-              onChange={(e) => setSelectedCsvFileId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
-            >
-              <option value="">Select CSV file</option>
-              {uploadedFiles && uploadedFiles.length > 0 ? (
-                uploadedFiles
-                  .filter(file => file.status === 'completed' && file.name.endsWith('.csv'))
-                  .map((file) => {
-                    const fileSizeKB = (file.size / 1024).toFixed(1);
-                    return (
-                      <option key={file.id} value={file.id}>
-                        {file.name} ({fileSizeKB} KB)
-                      </option>
-                    );
-                  })
-              ) : (
-                <option disabled>No CSV files uploaded</option>
-              )}
-            </select>
+            <div className="flex gap-2">
+              <select 
+                value={selectedCsvFileId} 
+                onChange={(e) => setSelectedCsvFileId(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
+              >
+                <option value="">Select CSV file</option>
+                {uploadedFiles && uploadedFiles.length > 0 ? (
+                  uploadedFiles
+                    .filter(file => file.status === 'completed' && file.name.endsWith('.csv'))
+                    .map((file) => {
+                      const fileSizeKB = (file.size / 1024).toFixed(1);
+                      return (
+                        <option key={file.id} value={file.id}>
+                          {file.name} ({fileSizeKB} KB)
+                        </option>
+                      );
+                    })
+                ) : (
+                  <option disabled>No CSV files uploaded</option>
+                )}
+              </select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await refreshUploadedFiles();
+                  } catch (error) {
+                    console.error('Failed to refresh files:', error);
+                  }
+                }}
+                className="px-3 py-2"
+                title="Refresh file list"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
 
           {/* Database Selection */}
@@ -816,9 +850,24 @@ export default function TalkData() {
                   </Button>
                 </div>
               </div>
-            ) : (
+            ) : selectedCsvFileId ? (
               <div className="text-muted-foreground">
                 No data available. Please try selecting the file again.
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                  <FileSpreadsheet className="w-8 h-8 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No CSV file selected
+                </h3>
+                <p className="text-gray-500 mb-4 max-w-sm">
+                  Select a CSV file from the dropdown above to start analyzing your data.
+                </p>
+                <div className="text-sm text-gray-400">
+                  Upload files in the Uploads section to get started.
+                </div>
               </div>
             )}
           </div>
