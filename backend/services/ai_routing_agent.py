@@ -83,7 +83,7 @@ class AIRoutingAgent:
             self.logger.error(f"Error in AI routing: {e}")
             # Fallback to safe default
             return {
-                "recommended_service": RecommendedService.CSV_SQL.value,
+                "recommended_service": "csv_to_sql_converter",
                 "reasoning": f"AI routing failed: {str(e)}. Using safe default.",
                 "confidence": 0.3,
                 "ai_analysis": "Error occurred during AI analysis",
@@ -112,23 +112,23 @@ class AIRoutingAgent:
         if context.data_source == "csv":
             # CSV file selected - only choose between CSV services
             available_services = """AVAILABLE SERVICES (CSV FILE SELECTED):
-1. csv_sql: SQL queries on CSV data (fast, familiar SQL syntax, good for simple queries)
-2. csv: Pandas operations on CSV data (powerful, good for complex statistical analysis and data transformation)
+1. csv_to_sql_converter: SQL queries on CSV data (fast, familiar SQL syntax, good for simple queries)
+2. data_analysis_service: Pandas operations on CSV data (powerful, good for complex statistical analysis and data transformation)
 
-IMPORTANT: You can ONLY choose between csv_sql and csv. Do NOT recommend database service."""
+IMPORTANT: You can ONLY choose between csv_to_sql_converter and data_analysis_service. Do NOT recommend database service."""
             
             analysis_guidelines = """ANALYSIS GUIDELINES (CSV FILE CONTEXT):
-- For simple queries (SELECT, WHERE, GROUP BY, COUNT, SUM, AVG): recommend csv_sql
-- For complex statistical analysis (correlation, regression, ML, clustering): recommend csv
-- For data transformation (pivot, reshape, merge, clean): recommend csv
-- For large CSV files (>100MB): prefer csv over csv_sql for complex operations
-- For user preferences: respect sql preference → csv_sql, python preference → csv
-- For ambiguous cases: choose csv_sql for simplicity
+- For simple queries (SELECT, WHERE, GROUP BY, COUNT, SUM, AVG): recommend csv_to_sql_converter
+- For complex statistical analysis (correlation, regression, ML, clustering): recommend data_analysis_service
+- For data transformation (pivot, reshape, merge, clean): recommend data_analysis_service
+- For large CSV files (>100MB): prefer data_analysis_service over csv_to_sql_converter for complex operations
+- For user preferences: respect sql preference → csv_to_sql_converter, python preference → data_analysis_service
+- For ambiguous cases: choose csv_to_sql_converter for simplicity
 - NEVER recommend database service when CSV file is selected"""
             
             response_format = """RESPONSE FORMAT (JSON only):
 {{
-    "recommended_service": "csv_sql|csv",
+    "recommended_service": "csv_to_sql_converter|data_analysis_service",
     "reasoning": "Brief explanation of why this service was chosen",
     "confidence": 0.85,
     "analysis_type": "simple_query|complex_statistical|data_transformation|large_dataset",
@@ -137,22 +137,22 @@ IMPORTANT: You can ONLY choose between csv_sql and csv. Do NOT recommend databas
         else:
             # Database context - can choose all services
             available_services = """AVAILABLE SERVICES (DATABASE CONTEXT):
-1. csv_sql: SQL queries on CSV data (fast, familiar SQL syntax, good for simple queries)
-2. csv: Pandas operations on CSV data (powerful, good for complex statistical analysis and data transformation)
+1. csv_to_sql_converter: SQL queries on CSV data (fast, familiar SQL syntax, good for simple queries)
+2. data_analysis_service: Pandas operations on CSV data (powerful, good for complex statistical analysis and data transformation)
 3. database: External database queries (real-time data, large datasets, production data)"""
             
             analysis_guidelines = """ANALYSIS GUIDELINES (DATABASE CONTEXT):
-- For simple queries (SELECT, WHERE, GROUP BY, COUNT, SUM, AVG): recommend csv_sql
-- For complex statistical analysis (correlation, regression, ML, clustering): recommend csv
-- For data transformation (pivot, reshape, merge, clean): recommend csv
+- For simple queries (SELECT, WHERE, GROUP BY, COUNT, SUM, AVG): recommend csv_to_sql_converter
+- For complex statistical analysis (correlation, regression, ML, clustering): recommend data_analysis_service
+- For data transformation (pivot, reshape, merge, clean): recommend data_analysis_service
 - For real-time data queries: recommend database
-- For large datasets (>100MB): prefer csv or database over csv_sql
-- For user preferences: respect sql preference → csv_sql, python preference → csv
-- For ambiguous cases: choose csv_sql for simplicity"""
+- For large datasets (>100MB): prefer data_analysis_service or database over csv_to_sql_converter
+- For user preferences: respect sql preference → csv_to_sql_converter, python preference → data_analysis_service
+- For ambiguous cases: choose csv_to_sql_converter for simplicity"""
             
             response_format = """RESPONSE FORMAT (JSON only):
 {{
-    "recommended_service": "csv_sql|csv|database",
+    "recommended_service": "csv_to_sql_converter|data_analysis_service|database",
     "reasoning": "Brief explanation of why this service was chosen",
     "confidence": 0.85,
     "analysis_type": "simple_query|complex_statistical|data_transformation|real_time|large_dataset",
@@ -191,16 +191,16 @@ Respond with ONLY the JSON, no other text:"""
             ai_data = json.loads(clean_response)
             
             # Validate the response
-            recommended_service = ai_data.get("recommended_service", "csv_sql")
+            recommended_service = ai_data.get("recommended_service", "csv_to_sql_converter")
             
             # Additional validation: Prevent database recommendation when CSV file is selected
             if context.data_source == "csv" and recommended_service == "database":
-                self.logger.warning("AI recommended database service for CSV file - overriding to csv_sql")
-                recommended_service = "csv_sql"
+                self.logger.warning("AI recommended database service for CSV file - overriding to csv_to_sql_converter")
+                recommended_service = "csv_to_sql_converter"
             
             # Validate service is in allowed list
-            if recommended_service not in ["csv_sql", "csv", "database"]:
-                recommended_service = "csv_sql"  # Safe default
+            if recommended_service not in ["csv_to_sql_converter", "data_analysis_service", "database"]:
+                recommended_service = "csv_to_sql_converter"  # Safe default
             
             return {
                 "recommended_service": recommended_service,
@@ -220,7 +220,7 @@ Respond with ONLY the JSON, no other text:"""
             self.logger.warning(f"Failed to parse AI response: {e}")
             # Fallback parsing
             return {
-                "recommended_service": RecommendedService.CSV_SQL.value,
+                "recommended_service": "csv_to_sql_converter",
                 "reasoning": f"AI response parsing failed: {str(e)}. Using safe default.",
                 "confidence": 0.4,
                 "ai_analysis": "parsing_error",

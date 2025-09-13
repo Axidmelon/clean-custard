@@ -114,30 +114,30 @@ async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse
         logger.info(f"💭 AI Reasoning: {reasoning}")
         
         # Route to the AI-recommended service
-        if recommended_service == "csv":
-            logger.info("🤖 AI routing to CSV pandas analysis")
+        if recommended_service == "data_analysis_service":
+            logger.info("🤖 AI routing to data analysis service (pandas)")
             return await handle_data_analysis_query(request, db)
-        elif recommended_service == "csv_sql":
-            logger.info("🤖 AI routing to CSV SQL analysis")
+        elif recommended_service == "csv_to_sql_converter":
+            logger.info("🤖 AI routing to CSV to SQL converter")
             return await handle_csv_sql_query(request, db)
         elif recommended_service == "database":
             # Safety check: Prevent database routing when CSV file is selected
             if request.file_id:
-                logger.warning("🤖 AI recommended database service for CSV file - overriding to CSV SQL")
-                logger.info("🤖 Routing to CSV SQL analysis instead")
+                logger.warning("🤖 AI recommended database service for CSV file - overriding to CSV to SQL converter")
+                logger.info("🤖 Routing to CSV to SQL converter instead")
                 return await handle_csv_sql_query(request, db)
             else:
                 logger.info("🤖 AI routing to database analysis")
                 return await handle_database_query(request, db)
         else:
-            # Fallback to CSV SQL for unknown recommendations
-            logger.warning(f"🤖 Unknown AI recommendation: {recommended_service}, falling back to CSV SQL")
+            # Fallback to CSV to SQL converter for unknown recommendations
+            logger.warning(f"🤖 Unknown AI recommendation: {recommended_service}, falling back to CSV to SQL converter")
             return await handle_csv_sql_query(request, db)
             
     except Exception as e:
         logger.error(f"🤖 Error in AI routing: {e}")
-        # Fallback to CSV SQL on error
-        logger.info("🤖 Falling back to CSV SQL due to AI routing error")
+        # Fallback to CSV to SQL converter on error
+        logger.info("🤖 Falling back to CSV to SQL converter due to AI routing error")
         return await handle_csv_sql_query(request, db)
 
 async def handle_data_analysis_query(request: QueryRequest, db: Session) -> QueryResponse:

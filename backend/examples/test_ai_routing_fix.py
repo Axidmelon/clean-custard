@@ -32,7 +32,7 @@ async def test_csv_file_routing():
                 data_source="csv",
                 user_preference="sql"
             ),
-            "expected_services": ["csv_sql", "csv"],
+            "expected_services": ["csv_to_sql_converter", "data_analysis_service"],
             "description": "Simple aggregation query on CSV file"
         },
         {
@@ -43,7 +43,7 @@ async def test_csv_file_routing():
                 data_source="csv",
                 user_preference="python"
             ),
-            "expected_services": ["csv_sql", "csv"],
+            "expected_services": ["csv_to_sql_converter", "data_analysis_service"],
             "description": "Complex statistical analysis on CSV file"
         },
         {
@@ -54,7 +54,7 @@ async def test_csv_file_routing():
                 data_source="csv",
                 user_preference=None
             ),
-            "expected_services": ["csv_sql", "csv"],
+            "expected_services": ["csv_to_sql_converter", "data_analysis_service"],
             "description": "Real-time query on CSV file (should NOT route to database)"
         }
     ]
@@ -69,7 +69,7 @@ async def test_csv_file_routing():
                 data_source="database",
                 user_preference=None
             ),
-            "expected_services": ["csv_sql", "csv", "database"],
+            "expected_services": ["csv_to_sql_converter", "data_analysis_service", "database"],
             "description": "Real-time database query"
         }
     ]
