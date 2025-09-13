@@ -19,7 +19,7 @@ class QueryRequest(BaseModel):
     connection_id: Optional[str] = None
     file_id: Optional[str] = None
     question: str
-    data_source: str = "database"  # "database" or "csv"
+    data_source: str = "database"  # "database", "csv", or "csv_sql"
 
 
 class QueryResponse(BaseModel):
@@ -50,11 +50,16 @@ def format_agent_result(result: list) -> str:
 async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(get_db)):
     """
     This endpoint orchestrates the entire "question-to-answer" flow.
-    Supports both database and CSV data sources.
+    Supports three data sources:
+    - "database": Traditional database queries via agents
+    - "csv": CSV data analysis using pandas operations
+    - "csv_sql": CSV data analysis using SQL queries on in-memory SQLite
     """
     # Route to appropriate handler based on data source
     if request.data_source == "csv":
         return await handle_data_analysis_query(request, db)
+    elif request.data_source == "csv_sql":
+        return await handle_csv_sql_query(request, db)
     else:
         return await handle_database_query(request, db)
 
@@ -114,6 +119,96 @@ async def handle_data_analysis_query(request: QueryRequest, db: Session) -> Quer
     except Exception as e:
         logger.error(f"Unexpected error processing data analysis query for file_id {request.file_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process data analysis query: {str(e)}")
+
+async def handle_csv_sql_query(request: QueryRequest, db: Session) -> QueryResponse:
+    """
+    Handle SQL queries on CSV data using in-memory SQLite.
+    """
+    from services.csv_to_sql_converter import csv_to_sql_converter
+    from services.data_analysis_service import data_analysis_service
+    from llm.services import TextToSQLService
+    from db.models import UploadedFile
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    if not request.file_id:
+        raise HTTPException(status_code=400, detail="file_id is required for CSV SQL queries")
+    
+    try:
+        logger.info(f"Processing CSV SQL query for file_id: {request.file_id}")
+        
+        # Validate file exists in database first
+        uploaded_file = db.query(UploadedFile).filter(
+            UploadedFile.id == request.file_id
+        ).first()
+        
+        if not uploaded_file:
+            logger.error(f"File not found in database: {request.file_id}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"File with ID {request.file_id} not found. Please ensure the file was uploaded successfully."
+            )
+        
+        logger.info(f"File found in database: {uploaded_file.original_filename}")
+        
+        # Validate file URL exists
+        if not uploaded_file.file_url:
+            logger.error(f"File URL is empty for file_id: {request.file_id}")
+            raise HTTPException(
+                status_code=400, 
+                detail="File URL is not available. Please re-upload the file."
+            )
+        
+        # Get CSV data using existing DataAnalysisService
+        df = await data_analysis_service._get_csv_data(request.file_id)
+        if df is None:
+            raise HTTPException(status_code=404, detail="CSV file not found or could not be loaded")
+        
+        # Convert CSV to SQLite table
+        table_name = await csv_to_sql_converter.convert_csv_to_sql(request.file_id, df.to_csv())
+        
+        # Get schema information for SQL generation
+        schema_info = await csv_to_sql_converter.get_table_schema(request.file_id)
+        
+        # Generate SQL query using existing TextToSQLService
+        # Create a schema string that TextToSQLService can understand
+        schema_string = f"Table: {table_name}\nColumns:\n"
+        for col in schema_info["columns"]:
+            schema_string += f"- {col['name']} ({col['type']})\n"
+        
+        # Add sample data for better context
+        if schema_info["sample_data"]:
+            schema_string += "\nSample data:\n"
+            for i, row in enumerate(schema_info["sample_data"][:3]):  # First 3 rows
+                schema_string += f"Row {i+1}: {row}\n"
+        
+        text_to_sql = TextToSQLService()
+        sql_query = text_to_sql.generate_sql(request.question, schema_string)
+        
+        # Execute SQL on CSV data
+        result = await csv_to_sql_converter.execute_sql_query(request.file_id, sql_query)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Format the answer
+        answer = format_agent_result(result["data"])
+        
+        return QueryResponse(
+            answer=answer,
+            sql_query=sql_query,
+            data=result["data"],
+            columns=result["columns"],
+            row_count=result["row_count"]
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error processing CSV SQL query for file_id {request.file_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process CSV SQL query: {str(e)}")
 
 async def handle_database_query(request: QueryRequest, db: Session) -> QueryResponse:
     """
