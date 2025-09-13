@@ -52,7 +52,7 @@ export interface QueryRequest {
   connection_id?: string;
   file_id?: string;
   question: string;
-  data_source: 'auto' | 'database' | 'csv' | 'csv_sql';
+  data_source?: 'auto' | 'database' | 'data_analysis_service' | 'csv_to_sql_converter'; // Optional - automatic routing
   user_preference?: 'sql' | 'python';
 }
 

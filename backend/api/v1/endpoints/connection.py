@@ -2,7 +2,7 @@
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import uuid
 import logging
 
@@ -24,8 +24,8 @@ class ConnectionStatusResponse(BaseModel):
     connection_id: str
     agent_connected: bool
     agent_id: str
-    last_activity: float = None
-    connection_metadata: dict = None
+    last_activity: Optional[float] = None
+    connection_metadata: Optional[dict] = None
 
 
 # Set up logging

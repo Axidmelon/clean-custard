@@ -1,10 +1,10 @@
 import React from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 
 interface DataSourceSelectorProps {
-  value: 'auto' | 'database' | 'csv' | 'csv_sql';
-  onChange: (value: 'auto' | 'database' | 'csv' | 'csv_sql') => void;
+  value: 'auto' | 'database' | 'data_analysis_service' | 'csv_to_sql_converter';
+  onChange: (value: 'auto' | 'database' | 'data_analysis_service' | 'csv_to_sql_converter') => void;
   hasFile: boolean;
   hasConnection: boolean;
   disabled?: boolean;
@@ -25,14 +25,14 @@ const DataSourceSelector: React.FC<DataSourceSelectorProps> = ({
       disabled: !hasFile && !hasConnection
     },
     {
-      value: 'csv',
-      label: '📊 Pandas Analysis',
+      value: 'data_analysis_service',
+      label: '📊 Data Analysis Service',
       description: 'Advanced data analysis with pandas',
       disabled: !hasFile
     },
     {
-      value: 'csv_sql',
-      label: '🗃️ SQL Queries',
+      value: 'csv_to_sql_converter',
+      label: '🗃️ CSV to SQL Converter',
       description: 'SQL queries on CSV data',
       disabled: !hasFile
     },
@@ -79,7 +79,7 @@ const DataSourceSelector: React.FC<DataSourceSelectorProps> = ({
                   <span>{option.label}</span>
                   <span className="text-xs">
                     {option.value === 'auto' ? '(requires file or connection)' :
-                     option.value === 'csv' || option.value === 'csv_sql' ? '(requires CSV file)' :
+                     option.value === 'data_analysis_service' || option.value === 'csv_to_sql_converter' ? '(requires CSV file)' :
                      '(requires database connection)'}
                   </span>
                 </div>

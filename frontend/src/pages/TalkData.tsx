@@ -12,9 +12,6 @@ import { signedUrlService } from "@/services/signedUrlService";
 import { SimpleChatEditor } from "@/components/blocknote/SimpleChatEditor";
 import { SimpleDataTable } from "@/components/blocknote/SimpleDataTable";
 import { RichTextDisplay } from "@/components/ui/RichTextDisplay";
-import DataSourceSelector from "@/components/DataSourceSelector";
-import UserPreferenceSelector from "@/components/UserPreferenceSelector";
-import ServiceExplanation from "@/components/ServiceExplanation";
 // import { APP_CONFIG } from "@/lib/constants";
 
 // Constants for CSV loading optimization
@@ -67,15 +64,6 @@ export default function TalkData() {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   
-  // NEW: AI Routing state
-  const [dataSource, setDataSource] = useState<'auto' | 'database' | 'csv' | 'csv_sql'>('auto');
-  const [userPreference, setUserPreference] = useState<'sql' | 'python' | undefined>(undefined);
-  const [aiRouting, setAiRouting] = useState<{
-    service_used: string;
-    reasoning: string;
-    confidence: number;
-  } | undefined>(undefined);
-  const [isAIRouting, setIsAIRouting] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -476,6 +464,11 @@ export default function TalkData() {
 
   const handleSubmit = async (content: string, retryMessageId?: string) => {
     if (!content.trim() || isLoading || (!selectedConnectionId && !selectedCsvFileId)) return;
+    
+    // Ensure only one data source is selected
+    if (selectedConnectionId && selectedCsvFileId) {
+      throw new Error("Please select only one data source - either a CSV file or a database connection, not both.");
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -491,47 +484,8 @@ export default function TalkData() {
     try {
       let response: QueryResponse;
       
-      // Determine data source and make appropriate API call
-      if (dataSource === 'auto') {
-        // AI routing - requires either file or connection
-        if (selectedCsvFileId) {
-          const selectedFile = uploadedFiles.find(file => file.id === selectedCsvFileId);
-          if (!selectedFile) {
-            throw new Error("Selected file not found. Please select a valid file.");
-          }
-          if (selectedFile.status !== 'completed') {
-            throw new Error("File upload is still in progress. Please wait for it to complete.");
-          }
-          
-          console.log('🤖 AI routing query for file:', {
-            fileId: selectedCsvFileId,
-            filename: selectedFile.name,
-            userPreference
-          });
-          
-          setIsAIRouting(true);
-          response = await queryService.askAIQuestion(selectedCsvFileId, userMessage.content, userPreference);
-        } else if (selectedConnectionId) {
-          console.log('🤖 AI routing query for database:', {
-            connectionId: selectedConnectionId,
-            userPreference
-          });
-          
-          setIsAIRouting(true);
-          // For database queries with AI routing, we need to create a custom request
-          // that includes both connection_id and data_source: 'auto'
-          const queryData = {
-            connection_id: selectedConnectionId,
-            question: userMessage.content,
-            data_source: 'auto' as const,
-            user_preference: userPreference
-          };
-          response = await queryService.askQuestion(queryData);
-        } else {
-          throw new Error("No data source selected for AI routing");
-        }
-      } else if (dataSource === 'csv' && selectedCsvFileId) {
-        // Data analysis query
+      // Simplified query logic - use AI routing for both file and database queries
+      if (selectedCsvFileId) {
         const selectedFile = uploadedFiles.find(file => file.id === selectedCsvFileId);
         if (!selectedFile) {
           throw new Error("Selected file not found. Please select a valid file.");
@@ -540,34 +494,18 @@ export default function TalkData() {
           throw new Error("File upload is still in progress. Please wait for it to complete.");
         }
         
-        console.log('📊 Data analysis query for file:', {
+        console.log('🤖 Automatic AI routing for CSV file:', {
           fileId: selectedCsvFileId,
           filename: selectedFile.name
         });
         
-        response = await queryService.askDataAnalysisQuestion(selectedCsvFileId, userMessage.content);
-      } else if (dataSource === 'csv_sql' && selectedCsvFileId) {
-        // CSV SQL query
-        const selectedFile = uploadedFiles.find(file => file.id === selectedCsvFileId);
-        if (!selectedFile) {
-          throw new Error("Selected file not found. Please select a valid file.");
-        }
-        if (selectedFile.status !== 'completed') {
-          throw new Error("File upload is still in progress. Please wait for it to complete.");
-        }
-        
-        console.log('🗃️ CSV SQL query for file:', {
-          fileId: selectedCsvFileId,
-          filename: selectedFile.name
-        });
-        
-        response = await queryService.askCSVSQLQuestion(selectedCsvFileId, userMessage.content);
-      } else if (dataSource === 'database' && selectedConnectionId) {
-        // Database query
-        console.log('🗄️ Database query for connection:', {
+        response = await queryService.askCSVQuestion(selectedCsvFileId, userMessage.content);
+      } else if (selectedConnectionId) {
+        console.log('🗄️ Direct database query (no AI routing):', {
           connectionId: selectedConnectionId
         });
         
+        // For database queries, go directly to database (no AI routing)
         response = await queryService.askDatabaseQuestion(selectedConnectionId, userMessage.content);
         
         // Mark agent as connected on successful query
@@ -576,13 +514,9 @@ export default function TalkData() {
           [selectedConnectionId]: true
         }));
       } else {
-        throw new Error("No data source selected or invalid data source configuration");
+        throw new Error("No data source selected");
       }
       
-      // Store AI routing information if available
-      if (response.ai_routing) {
-        setAiRouting(response.ai_routing);
-      }
       
       const assistantMessage: Message = {
         id: retryMessageId || (Date.now() + 1).toString(),
@@ -606,9 +540,6 @@ export default function TalkData() {
       const errorType = getErrorType(error);
       const errorContent = getErrorMessage(error, errorType);
       
-      // Reset AI routing state on error
-      setIsAIRouting(false);
-      setAiRouting(undefined);
       
       // Update agent status based on error type
       if (errorType === 'agent_disconnected') {
@@ -637,7 +568,6 @@ export default function TalkData() {
       }
     } finally {
       setIsLoading(false);
-      setIsAIRouting(false);
     }
   };
 
@@ -746,35 +676,6 @@ export default function TalkData() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <div className="mb-4 px-2">
-        {/* Data Source Selection */}
-        <div className="mb-4">
-          <DataSourceSelector
-            value={dataSource}
-            onChange={(value) => setDataSource(value as 'auto' | 'database' | 'csv' | 'csv_sql')}
-            hasFile={!!selectedCsvFileId}
-            hasConnection={!!selectedConnectionId}
-            disabled={isLoading}
-          />
-        </div>
-        
-        {/* User Preference Selector (only for AI mode) */}
-        {dataSource === 'auto' && (
-          <div className="mb-4">
-            <UserPreferenceSelector
-              value={userPreference}
-              onChange={setUserPreference}
-              disabled={isLoading}
-            />
-          </div>
-        )}
-        
-        {/* Service Explanation */}
-        {(aiRouting || isAIRouting) && (
-          <div className="mb-4">
-            <ServiceExplanation aiRouting={aiRouting} isLoading={isAIRouting} />
-          </div>
-        )}
-        
         {/* Connection and CSV File Selection */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {/* CSV File Selection */}
@@ -786,7 +687,13 @@ export default function TalkData() {
             <div className="flex gap-2">
               <select 
                 value={selectedCsvFileId} 
-                onChange={(e) => setSelectedCsvFileId(e.target.value)}
+                onChange={(e) => {
+                  setSelectedCsvFileId(e.target.value);
+                  // Clear database selection when CSV file is selected
+                  if (e.target.value) {
+                    setSelectedConnectionId("");
+                  }
+                }}
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
               >
                 <option value="">Select CSV file</option>
@@ -831,7 +738,13 @@ export default function TalkData() {
             </div>
             <select 
               value={selectedConnectionId} 
-              onChange={(e) => setSelectedConnectionId(e.target.value)}
+              onChange={(e) => {
+                setSelectedConnectionId(e.target.value);
+                // Clear CSV file selection when database is selected
+                if (e.target.value) {
+                  setSelectedCsvFileId("");
+                }
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
             >
               <option value="">Select database</option>
@@ -878,7 +791,7 @@ export default function TalkData() {
                 Select a data source
               </h3>
               <p className="text-sm text-muted-foreground max-w-md">
-                Please select either a database connection or an uploaded CSV file above to analyse your data.
+                Please select either a database connection or an uploaded CSV file above to analyse your data. Only one data source can be selected at a time.
               </p>
             </div>
           </div>
@@ -1163,7 +1076,7 @@ export default function TalkData() {
         <SimpleChatEditor
           onSubmit={handleSubmit}
           disabled={isLoading || (!selectedConnectionId && !selectedCsvFileId)}
-          placeholder={(!selectedConnectionId && !selectedCsvFileId) ? "Select a database connection or CSV file first..." : "Ask a question to analyse your data..."}
+          placeholder={(!selectedConnectionId && !selectedCsvFileId) ? "Select either a database connection or CSV file first..." : "Ask a question to analyse your data..."}
           onFileUpload={() => setIsUploadDialogOpen(true)}
           allowFileUploadWhenDisabled={true}
         />

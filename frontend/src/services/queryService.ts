@@ -37,29 +37,8 @@ const askQuestion = async (queryData: QueryRequest): Promise<QueryResponse> => {
   return handleResponse<QueryResponse>(response);
 };
 
-// Data analysis query functions
-const askDataAnalysisQuestion = async (fileId: string, question: string): Promise<QueryResponse> => {
-  const queryData: QueryRequest = {
-    file_id: fileId,
-    question: question,
-    data_source: 'csv'
-  };
-  
-  return askQuestion(queryData);
-};
-
-const askDatabaseQuestion = async (connectionId: string, question: string): Promise<QueryResponse> => {
-  const queryData: QueryRequest = {
-    connection_id: connectionId,
-    question: question,
-    data_source: 'database'
-  };
-  
-  return askQuestion(queryData);
-};
-
-// AI routing query function
-const askAIQuestion = async (
+// Automatic CSV query function (AI routing decides the best service)
+const askCSVQuestion = async (
   fileId: string, 
   question: string, 
   userPreference?: 'sql' | 'python'
@@ -67,19 +46,19 @@ const askAIQuestion = async (
   const queryData: QueryRequest = {
     file_id: fileId,
     question: question,
-    data_source: 'auto',
     user_preference: userPreference
+    // No data_source needed - AI routing is automatic
   };
   
   return askQuestion(queryData);
 };
 
-// CSV SQL query function
-const askCSVSQLQuestion = async (fileId: string, question: string): Promise<QueryResponse> => {
+// Database query function (no AI routing)
+const askDatabaseQuestion = async (connectionId: string, question: string): Promise<QueryResponse> => {
   const queryData: QueryRequest = {
-    file_id: fileId,
-    question: question,
-    data_source: 'csv_sql'
+    connection_id: connectionId,
+    question: question
+    // No data_source needed - goes directly to database
   };
   
   return askQuestion(queryData);
@@ -87,8 +66,6 @@ const askCSVSQLQuestion = async (fileId: string, question: string): Promise<Quer
 
 export const queryService = {
   askQuestion,
-  askDataAnalysisQuestion,
-  askDatabaseQuestion,
-  askAIQuestion,        // NEW: AI-powered routing
-  askCSVSQLQuestion     // NEW: CSV to SQL converter
+  askCSVQuestion,       // Automatic AI routing for CSV data
+  askDatabaseQuestion   // Direct database queries (no AI routing)
 };
