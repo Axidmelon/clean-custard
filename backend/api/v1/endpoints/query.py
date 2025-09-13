@@ -121,8 +121,14 @@ async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse
             logger.info("🤖 AI routing to CSV SQL analysis")
             return await handle_csv_sql_query(request, db)
         elif recommended_service == "database":
-            logger.info("🤖 AI routing to database analysis")
-            return await handle_database_query(request, db)
+            # Safety check: Prevent database routing when CSV file is selected
+            if request.file_id:
+                logger.warning("🤖 AI recommended database service for CSV file - overriding to CSV SQL")
+                logger.info("🤖 Routing to CSV SQL analysis instead")
+                return await handle_csv_sql_query(request, db)
+            else:
+                logger.info("🤖 AI routing to database analysis")
+                return await handle_database_query(request, db)
         else:
             # Fallback to CSV SQL for unknown recommendations
             logger.warning(f"🤖 Unknown AI recommendation: {recommended_service}, falling back to CSV SQL")

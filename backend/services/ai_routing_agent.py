@@ -108,35 +108,69 @@ class AIRoutingAgent:
         
         context_str = "\n".join(context_info) if context_info else "No additional context"
         
-        prompt = f"""You are an expert data analysis routing agent. Your job is to analyze user questions and recommend the best service for data analysis.
-
-AVAILABLE SERVICES:
+        # Determine available services based on context
+        if context.data_source == "csv":
+            # CSV file selected - only choose between CSV services
+            available_services = """AVAILABLE SERVICES (CSV FILE SELECTED):
 1. csv_sql: SQL queries on CSV data (fast, familiar SQL syntax, good for simple queries)
 2. csv: Pandas operations on CSV data (powerful, good for complex statistical analysis and data transformation)
-3. database: External database queries (real-time data, large datasets, production data)
 
-USER QUESTION: {question}
-
-CONTEXT:
-{context_str}
-
-ANALYSIS GUIDELINES:
+IMPORTANT: You can ONLY choose between csv_sql and csv. Do NOT recommend database service."""
+            
+            analysis_guidelines = """ANALYSIS GUIDELINES (CSV FILE CONTEXT):
+- For simple queries (SELECT, WHERE, GROUP BY, COUNT, SUM, AVG): recommend csv_sql
+- For complex statistical analysis (correlation, regression, ML, clustering): recommend csv
+- For data transformation (pivot, reshape, merge, clean): recommend csv
+- For large CSV files (>100MB): prefer csv over csv_sql for complex operations
+- For user preferences: respect sql preference → csv_sql, python preference → csv
+- For ambiguous cases: choose csv_sql for simplicity
+- NEVER recommend database service when CSV file is selected"""
+            
+            response_format = """RESPONSE FORMAT (JSON only):
+{{
+    "recommended_service": "csv_sql|csv",
+    "reasoning": "Brief explanation of why this service was chosen",
+    "confidence": 0.85,
+    "analysis_type": "simple_query|complex_statistical|data_transformation|large_dataset",
+    "key_factors": ["factor1", "factor2", "factor3"]
+}}"""
+        else:
+            # Database context - can choose all services
+            available_services = """AVAILABLE SERVICES (DATABASE CONTEXT):
+1. csv_sql: SQL queries on CSV data (fast, familiar SQL syntax, good for simple queries)
+2. csv: Pandas operations on CSV data (powerful, good for complex statistical analysis and data transformation)
+3. database: External database queries (real-time data, large datasets, production data)"""
+            
+            analysis_guidelines = """ANALYSIS GUIDELINES (DATABASE CONTEXT):
 - For simple queries (SELECT, WHERE, GROUP BY, COUNT, SUM, AVG): recommend csv_sql
 - For complex statistical analysis (correlation, regression, ML, clustering): recommend csv
 - For data transformation (pivot, reshape, merge, clean): recommend csv
 - For real-time data queries: recommend database
 - For large datasets (>100MB): prefer csv or database over csv_sql
 - For user preferences: respect sql preference → csv_sql, python preference → csv
-- For ambiguous cases: choose csv_sql for simplicity
-
-RESPONSE FORMAT (JSON only):
+- For ambiguous cases: choose csv_sql for simplicity"""
+            
+            response_format = """RESPONSE FORMAT (JSON only):
 {{
     "recommended_service": "csv_sql|csv|database",
     "reasoning": "Brief explanation of why this service was chosen",
     "confidence": 0.85,
     "analysis_type": "simple_query|complex_statistical|data_transformation|real_time|large_dataset",
     "key_factors": ["factor1", "factor2", "factor3"]
-}}
+}}"""
+        
+        prompt = f"""You are an expert data analysis routing agent. Your job is to analyze user questions and recommend the best service for data analysis.
+
+{available_services}
+
+USER QUESTION: {question}
+
+CONTEXT:
+{context_str}
+
+{analysis_guidelines}
+
+{response_format}
 
 Respond with ONLY the JSON, no other text:"""
 
@@ -158,6 +192,13 @@ Respond with ONLY the JSON, no other text:"""
             
             # Validate the response
             recommended_service = ai_data.get("recommended_service", "csv_sql")
+            
+            # Additional validation: Prevent database recommendation when CSV file is selected
+            if context.data_source == "csv" and recommended_service == "database":
+                self.logger.warning("AI recommended database service for CSV file - overriding to csv_sql")
+                recommended_service = "csv_sql"
+            
+            # Validate service is in allowed list
             if recommended_service not in ["csv_sql", "csv", "database"]:
                 recommended_service = "csv_sql"  # Safe default
             
