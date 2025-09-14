@@ -48,6 +48,7 @@ requests>=2.32.0
 # Data processing and analysis
 pandas>=2.3.2
 numpy>=2.3.3
+statsmodels>=0.14.0
 
 # Production monitoring and logging
 structlog>=24.1.0

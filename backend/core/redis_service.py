@@ -26,6 +26,7 @@ class RedisService:
     
     def __init__(self):
         self.redis_client = None
+        self.redis_binary_client = None  # Separate client for binary data
         self.is_available = False
         self._connect()
     
@@ -46,7 +47,7 @@ class RedisService:
             else:
                 host, port, db = 'localhost', 6379, 0
             
-            # Create Redis connection with timeout settings
+            # Create Redis connection with timeout settings (for text data)
             self.redis_client = redis.Redis(
                 host=host,
                 port=port,
@@ -58,23 +59,38 @@ class RedisService:
                 health_check_interval=30
             )
             
+            # Create separate Redis client for binary data (CSV caching)
+            self.redis_binary_client = redis.Redis(
+                host=host,
+                port=port,
+                db=db,
+                decode_responses=False,  # Keep binary data as bytes
+                socket_timeout=5,
+                socket_connect_timeout=5,
+                retry_on_timeout=True,
+                health_check_interval=30
+            )
+            
             # Test connection
             self.redis_client.ping()
+            self.redis_binary_client.ping()
             self.is_available = True
-            logger.info(f"Redis connected successfully to {host}:{port}/{db}")
+            logger.info(f"Redis connected successfully to {host}:{port}/{db} (text + binary clients)")
             
         except Exception as e:
             logger.warning(f"Redis connection failed: {e}. Falling back to database-only mode.")
             self.is_available = False
             self.redis_client = None
+            self.redis_binary_client = None
     
     def _ensure_connection(self):
         """Ensure Redis connection is active, reconnect if needed."""
         if not self.is_available:
             self._connect()
-        elif self.redis_client:
+        elif self.redis_client and self.redis_binary_client:
             try:
                 self.redis_client.ping()
+                self.redis_binary_client.ping()
             except Exception:
                 logger.warning("Redis connection lost, attempting to reconnect...")
                 self._connect()
@@ -438,16 +454,32 @@ class RedisService:
             self._ensure_connection()
             key = f"csv_data:{user_id}:{file_id}"
             
+            # Validate input data
+            if not csv_content or not isinstance(csv_content, str):
+                logger.error(f"Invalid CSV content for user {user_id}, file {file_id}")
+                return False
+            
             # Compress CSV content to save memory
             import gzip
-            compressed_content = gzip.compress(csv_content.encode('utf-8'))
+            try:
+                compressed_content = gzip.compress(csv_content.encode('utf-8'))
+                logger.debug(f"Compressed CSV data: {len(csv_content)} -> {len(compressed_content)} bytes")
+            except Exception as compress_error:
+                logger.error(f"Failed to compress CSV data for user {user_id}, file {file_id}: {compress_error}")
+                return False
             
-            if not self.redis_client:
-                logger.error("Redis client is not available")
+            if not self.redis_binary_client:
+                logger.error("Redis binary client is not available")
                 return False
                 
-            result = self.redis_client.setex(key, ttl, compressed_content)
-            logger.info(f"Cached CSV data for user {user_id}, file {file_id}, size: {len(csv_content)} bytes")
+            # Store compressed binary data using binary client
+            result = self.redis_binary_client.setex(key, ttl, compressed_content)
+            
+            if result:
+                logger.info(f"Cached CSV data for user {user_id}, file {file_id}, size: {len(csv_content)} bytes (compressed: {len(compressed_content)} bytes)")
+            else:
+                logger.warning(f"Failed to store CSV data in Redis for user {user_id}, file {file_id}")
+                
             return bool(result)
             
         except Exception as e:
@@ -471,15 +503,38 @@ class RedisService:
         try:
             self._ensure_connection()
             key = f"csv_data:{user_id}:{file_id}"
-            compressed_data = self.redis_client.get(key)
+            
+            if not self.redis_binary_client:
+                logger.error("Redis binary client is not available")
+                return None
+            
+            # Retrieve compressed binary data using binary client
+            compressed_data = self.redis_binary_client.get(key)
             
             if compressed_data:
+                # Validate that we got binary data
+                if not isinstance(compressed_data, bytes):
+                    logger.error(f"Expected binary data but got {type(compressed_data)} for user {user_id}, file {file_id}")
+                    return None
+                
                 # Decompress the data
                 import gzip
-                csv_content = gzip.decompress(compressed_data).decode('utf-8')
-                logger.debug(f"Retrieved cached CSV data for user {user_id}, file {file_id}")
-                return csv_content
+                try:
+                    csv_content = gzip.decompress(compressed_data).decode('utf-8')
+                    logger.debug(f"Retrieved cached CSV data for user {user_id}, file {file_id}, size: {len(csv_content)} bytes")
+                    return csv_content
+                except gzip.BadGzipFile as gzip_error:
+                    logger.error(f"Invalid gzip data for user {user_id}, file {file_id}: {gzip_error}")
+                    # Invalidate corrupted cache entry
+                    self.invalidate_csv_cache(user_id, file_id)
+                    return None
+                except UnicodeDecodeError as decode_error:
+                    logger.error(f"UTF-8 decode error for user {user_id}, file {file_id}: {decode_error}")
+                    # Invalidate corrupted cache entry
+                    self.invalidate_csv_cache(user_id, file_id)
+                    return None
             
+            logger.debug(f"No cached CSV data found for user {user_id}, file {file_id}")
             return None
             
         except Exception as e:
@@ -503,7 +558,12 @@ class RedisService:
         try:
             self._ensure_connection()
             key = f"csv_data:{user_id}:{file_id}"
-            result = self.redis_client.delete(key)
+            
+            if not self.redis_binary_client:
+                logger.error("Redis binary client is not available")
+                return False
+            
+            result = self.redis_binary_client.delete(key)
             logger.info(f"Invalidated CSV cache for user {user_id}, file {file_id}")
             return bool(result)
             
@@ -524,15 +584,18 @@ class RedisService:
         try:
             self._ensure_connection()
             
-            # Count CSV cache keys
-            csv_keys = self.redis_client.keys("csv_data:*")
+            if not self.redis_binary_client:
+                return {"status": "error", "error": "Redis binary client not available"}
+            
+            # Count CSV cache keys using binary client
+            csv_keys = self.redis_binary_client.keys("csv_data:*")
             total_csv_files = len(csv_keys)
             
             # Calculate total memory usage for CSV data
             total_size = 0
             for key in csv_keys:
                 try:
-                    size = self.redis_client.memory_usage(key)
+                    size = self.redis_binary_client.memory_usage(key)
                     total_size += size
                 except Exception:
                     continue
@@ -635,15 +698,19 @@ class RedisService:
             
             import time
             
+            if not self.redis_binary_client:
+                logger.error("Redis binary client is not available")
+                return []
+            
             expiring_caches = []
-            csv_keys = self.redis_client.keys("csv_data:*")
+            csv_keys = self.redis_binary_client.keys("csv_data:*")
             current_time = int(time.time())
             expiry_threshold = minutes_before_expiry * 60  # Convert to seconds
             
             for key in csv_keys:
                 try:
                     # Get TTL for this key
-                    ttl = self.redis_client.ttl(key)
+                    ttl = self.redis_binary_client.ttl(key)
                     
                     # TTL returns -1 if key exists but has no expiry, -2 if key doesn't exist
                     # We only want keys with positive TTL (expiring keys)
@@ -693,19 +760,19 @@ class RedisService:
         try:
             self._ensure_connection()
             
-            if not self.redis_client:
-                logger.error("Redis client is not available")
+            if not self.redis_binary_client:
+                logger.error("Redis binary client is not available")
                 return False
             
             key = f"csv_data:{user_id}:{file_id}"
             
             # Check if cache exists
-            if not self.redis_client.exists(key):
+            if not self.redis_binary_client.exists(key):
                 logger.warning(f"Cache key {key} does not exist for refresh")
                 return False
             
             # Extend TTL by 2 hours (7200 seconds)
-            result = self.redis_client.expire(key, 7200)
+            result = self.redis_binary_client.expire(key, 7200)
             
             if result:
                 logger.info(f"Successfully refreshed cache for user {user_id}, file {file_id}")

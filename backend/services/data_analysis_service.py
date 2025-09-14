@@ -79,12 +79,26 @@ INSTRUCTIONS:
    - df['column'].unique() - unique values
    - df['column'].nunique() - count of unique values
 
+STATISTICAL ANALYSIS (when applicable):
+For regression analysis, correlation, or advanced statistics, use statsmodels:
+   - import statsmodels.api as sm
+   - For linear regression: X = sm.add_constant(df['predictor']); model = sm.OLS(df['target'], X).fit()
+   - For correlation: df[['col1', 'col2']].corr()
+   - For statistical tests: from scipy import stats; stats.ttest_ind(df['group1'], df['group2'])
+
+CRITICAL RULE FOR STATISTICAL RESULTS:
+When performing regression or statistical analysis, ALWAYS create a results dictionary:
+   - For regression: results = {{'r_squared': model.rsquared, 'coefficients': model.params.to_dict(), 'p_values': model.pvalues.to_dict(), 'summary': str(model.summary())}}
+   - For correlation: results = {{'correlation_matrix': df[['col1', 'col2']].corr().to_dict()}}
+   - For other stats: results = {{'statistic': result_stat, 'p_value': p_val, 'interpretation': 'your_interpretation'}}
+
 IMPORTANT RULES:
 - Always use 'df' as the DataFrame variable name
 - Return ONLY the pandas code, no explanations
 - Handle missing values with .fillna() if needed
 - Use .iloc[:10] to limit results to first 10 rows for large datasets
 - For aggregations, use .agg() with proper column names
+- For statistical analysis, ALWAYS create a 'results' variable with structured output
 
 PANDAS CODE:
 """
@@ -583,11 +597,17 @@ PANDAS CODE:
                 
                 # Try to find the result variable (look for common patterns)
                 result = None
-                for key, value in safe_globals.items():
-                    if key not in ['df', 'pd', 'np', 'len', 'sum', 'max', 'min', 'abs', 'round']:
-                        if not callable(value) and not key.startswith('_'):
-                            result = value
-                            break
+                
+                # First, check for 'results' variable (preferred for statistical analysis)
+                if 'results' in safe_globals:
+                    result = safe_globals['results']
+                else:
+                    # Look for other common result variables
+                    for key, value in safe_globals.items():
+                        if key not in ['df', 'pd', 'np', 'len', 'sum', 'max', 'min', 'abs', 'round', 'sm', 'stats']:
+                            if not callable(value) and not key.startswith('_'):
+                                result = value
+                                break
                 
                 if result is None:
                     # Fallback: try to get the last assigned variable
@@ -645,6 +665,14 @@ PANDAS CODE:
                     "row_count": len(result),
                     "display_type": "series"
                 })
+            elif isinstance(result, dict):
+                # Handle statistical results dictionary
+                formatted_result.update({
+                    "data": self._format_statistical_results(result),
+                    "columns": ["Metric", "Value"],
+                    "row_count": len(result),
+                    "display_type": "statistical_results"
+                })
             elif isinstance(result, (int, float, str, bool)):
                 formatted_result.update({
                     "data": [[result]],
@@ -653,13 +681,23 @@ PANDAS CODE:
                     "display_type": "single_value"
                 })
             else:
-                # Convert to string for other types
-                formatted_result.update({
-                    "data": [[str(result)]],
-                    "columns": ["result"],
-                    "row_count": 1,
-                    "display_type": "other"
-                })
+                # Check if it's a statsmodels result object
+                if hasattr(result, 'rsquared') and hasattr(result, 'params'):
+                    # It's a statsmodels regression result
+                    formatted_result.update({
+                        "data": self._format_statsmodels_result(result),
+                        "columns": ["Metric", "Value"],
+                        "row_count": len(self._format_statsmodels_result(result)),
+                        "display_type": "regression_results"
+                    })
+                else:
+                    # Convert to string for other types
+                    formatted_result.update({
+                        "data": [[str(result)]],
+                        "columns": ["result"],
+                        "row_count": 1,
+                        "display_type": "other"
+                    })
             
             # Generate natural language response
             formatted_result["natural_response"] = self._generate_natural_response(result, question)
@@ -669,6 +707,71 @@ PANDAS CODE:
         except Exception as e:
             logger.error(f"Error formatting query result: {e}")
             raise
+    
+    def _format_statistical_results(self, result_dict: dict) -> List[List[str]]:
+        """
+        Format statistical results dictionary into table format.
+        
+        Args:
+            result_dict: Dictionary containing statistical results
+            
+        Returns:
+            List of rows for display
+        """
+        try:
+            rows = []
+            for key, value in result_dict.items():
+                if isinstance(value, dict):
+                    # Handle nested dictionaries (like coefficients)
+                    for sub_key, sub_value in value.items():
+                        rows.append([f"{key} ({sub_key})", str(sub_value)])
+                elif isinstance(value, (int, float)):
+                    # Format numbers nicely
+                    if isinstance(value, float):
+                        rows.append([key, f"{value:.4f}"])
+                    else:
+                        rows.append([key, str(value)])
+                else:
+                    rows.append([key, str(value)])
+            return rows
+        except Exception as e:
+            logger.error(f"Error formatting statistical results: {e}")
+            return [["Error", str(e)]]
+    
+    def _format_statsmodels_result(self, model) -> List[List[str]]:
+        """
+        Format statsmodels regression result into table format.
+        
+        Args:
+            model: statsmodels regression model result
+            
+        Returns:
+            List of rows for display
+        """
+        try:
+            rows = []
+            
+            # Add basic regression statistics
+            rows.append(["R-squared", f"{model.rsquared:.4f}"])
+            rows.append(["Adj. R-squared", f"{model.rsquared_adj:.4f}"])
+            rows.append(["F-statistic", f"{model.fvalue:.4f}"])
+            rows.append(["Prob (F-statistic)", f"{model.f_pvalue:.4f}"])
+            rows.append(["AIC", f"{model.aic:.4f}"])
+            rows.append(["BIC", f"{model.bic:.4f}"])
+            
+            # Add coefficients
+            rows.append(["", ""])  # Empty row for separation
+            rows.append(["Coefficients", ""])
+            
+            for param_name, param_value in model.params.items():
+                p_value = model.pvalues.get(param_name, 0)
+                significance = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*" if p_value < 0.05 else ""
+                rows.append([f"  {param_name}", f"{param_value:.4f} {significance}"])
+            
+            return rows
+        except Exception as e:
+            logger.error(f"Error formatting statsmodels result: {e}")
+            return [["Error", str(e)]]
     
     def _generate_natural_response(self, result: Any, question: str) -> str:
         """
@@ -703,6 +806,14 @@ PANDAS CODE:
                     result_summary = self._prepare_result_summary(result)
                     return self._generate_llm_response(question, result_summary)
             
+            elif isinstance(result, dict):
+                # Statistical results dictionary - generate specialized response
+                return self._generate_statistical_response(question, result)
+            
+            elif hasattr(result, 'rsquared') and hasattr(result, 'params'):
+                # statsmodels regression result - generate specialized response
+                return self._generate_regression_response(question, result)
+            
             elif isinstance(result, (int, float, str)):
                 # Single value - use ResultFormatter
                 return ResultFormatter.generate_contextual_response(question, result)
@@ -716,6 +827,125 @@ PANDAS CODE:
             logger.error(f"Error generating natural response: {e}")
             # Fallback to simple response
             return self._generate_fallback_response(result)
+    
+    def _generate_statistical_response(self, question: str, result_dict: dict) -> str:
+        """
+        Generate specialized response for statistical results dictionary.
+        
+        Args:
+            question: Original question
+            result_dict: Dictionary containing statistical results
+            
+        Returns:
+            Natural language response
+        """
+        try:
+            if 'r_squared' in result_dict:
+                # Regression analysis results
+                r_squared = result_dict.get('r_squared', 0)
+                coefficients = result_dict.get('coefficients', {})
+                
+                response = f"The regression analysis shows an R-squared value of {r_squared:.4f}, "
+                response += f"indicating that {r_squared*100:.1f}% of the variance in the dependent variable is explained by the model. "
+                
+                if coefficients:
+                    main_coeff = None
+                    for key, value in coefficients.items():
+                        if key != 'const':
+                            main_coeff = (key, value)
+                            break
+                    
+                    if main_coeff:
+                        var_name, coeff_value = main_coeff
+                        response += f"The coefficient for {var_name} is {coeff_value:.4f}, "
+                        if coeff_value > 0:
+                            response += "indicating a positive relationship. "
+                        else:
+                            response += "indicating a negative relationship. "
+                
+                return response + "This suggests a statistically significant relationship between the variables."
+            
+            elif 'correlation_matrix' in result_dict:
+                # Correlation analysis results
+                corr_matrix = result_dict['correlation_matrix']
+                response = "The correlation analysis shows the relationship between variables: "
+                for var1, correlations in corr_matrix.items():
+                    for var2, corr_value in correlations.items():
+                        if var1 != var2:
+                            response += f"{var1} and {var2} have a correlation of {corr_value:.4f}. "
+                return response
+            
+            else:
+                # Generic statistical results
+                response = "The statistical analysis reveals: "
+                for key, value in result_dict.items():
+                    if isinstance(value, (int, float)):
+                        response += f"{key}: {value:.4f}. "
+                    else:
+                        response += f"{key}: {value}. "
+                return response
+                
+        except Exception as e:
+            logger.error(f"Error generating statistical response: {e}")
+            return "Statistical analysis completed successfully."
+    
+    def _generate_regression_response(self, question: str, model) -> str:
+        """
+        Generate specialized response for statsmodels regression results.
+        
+        Args:
+            question: Original question
+            model: statsmodels regression model result
+            
+        Returns:
+            Natural language response
+        """
+        try:
+            response = f"The regression analysis shows an R-squared value of {model.rsquared:.4f}, "
+            response += f"indicating that {model.rsquared*100:.1f}% of the variance is explained by the model. "
+            
+            # Find the main predictor variable
+            main_predictor = None
+            main_coeff = None
+            for param_name, param_value in model.params.items():
+                if param_name != 'const':
+                    main_predictor = param_name
+                    main_coeff = param_value
+                    break
+            
+            if main_predictor and main_coeff is not None:
+                p_value = model.pvalues.get(main_predictor, 1)
+                response += f"The coefficient for {main_predictor} is {main_coeff:.4f} "
+                
+                if p_value < 0.001:
+                    response += "(highly significant, p < 0.001). "
+                elif p_value < 0.01:
+                    response += "(very significant, p < 0.01). "
+                elif p_value < 0.05:
+                    response += "(significant, p < 0.05). "
+                else:
+                    response += f"(not significant, p = {p_value:.4f}). "
+                
+                if main_coeff > 0:
+                    response += "This indicates a positive relationship between the variables. "
+                else:
+                    response += "This indicates a negative relationship between the variables. "
+            
+            # Add model quality assessment
+            if model.rsquared > 0.8:
+                response += "The model provides an excellent fit to the data. "
+            elif model.rsquared > 0.6:
+                response += "The model provides a good fit to the data. "
+            elif model.rsquared > 0.3:
+                response += "The model provides a moderate fit to the data. "
+            else:
+                response += "The model provides a weak fit to the data. "
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error generating regression response: {e}")
+            return "Regression analysis completed successfully."
     
     def _generate_llm_response(self, question: str, result_summary: str) -> str:
         """
