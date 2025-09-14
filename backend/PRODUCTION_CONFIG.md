@@ -7,7 +7,7 @@ Set these environment variables in your production deployment (Railway, Docker, 
 ### Security Configuration
 ```bash
 SECRET_KEY=your-super-secure-secret-key-here-change-in-production
-ACCESS_TOKEN_EXPIRE_MINUTES=60
+ACCESS_TOKEN_EXPIRE_MINUTES=360
 REFRESH_TOKEN_EXPIRE_DAYS=7
 ```
 

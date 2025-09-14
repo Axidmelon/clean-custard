@@ -175,24 +175,27 @@ async def delete_file(
                 detail="File not found"
             )
         
-        # Delete from Cloudinary
-        success = await cloudinary_upload_service.delete_file(uploaded_file.file_path)
+        # Delete from Cloudinary (if public_id exists)
+        cloudinary_success = True
+        if uploaded_file.cloudinary_public_id:
+            try:
+                cloudinary_success = await cloudinary_upload_service.delete_file(uploaded_file.cloudinary_public_id)
+                if not cloudinary_success:
+                    logger.warning(f"Failed to delete file from Cloudinary: {uploaded_file.cloudinary_public_id}")
+            except Exception as cloudinary_error:
+                logger.warning(f"Error deleting from Cloudinary: {cloudinary_error}")
+                cloudinary_success = False
         
-        if success:
-            # Remove from database
-            db.delete(uploaded_file)
-            db.commit()
-            
-            logger.info(f"File deleted successfully: {uploaded_file.original_filename} by user {current_user.id}")
-            return {
-                "success": True,
-                "message": "File deleted successfully"
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete file from storage"
-            )
+        # Always remove from database, even if Cloudinary deletion fails
+        # This ensures the file is removed from the user's view
+        db.delete(uploaded_file)
+        db.commit()
+        
+        logger.info(f"File deleted successfully: {uploaded_file.original_filename} by user {current_user.id}")
+        return {
+            "success": True,
+            "message": "File deleted successfully"
+        }
             
     except HTTPException:
         raise

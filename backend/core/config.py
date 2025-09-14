@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # Security Configuration
     secret_key: str
-    access_token_expire_minutes: int = 60
+    access_token_expire_minutes: int = 360
     refresh_token_expire_days: int = 7
     # Database Configuration
     database_url: str

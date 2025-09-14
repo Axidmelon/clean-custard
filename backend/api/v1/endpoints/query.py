@@ -1,7 +1,7 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 import logging
 
 from db.dependencies import get_db
@@ -22,6 +22,7 @@ from pydantic import BaseModel
 class QueryRequest(BaseModel):
     connection_id: Optional[str] = None
     file_id: Optional[str] = None
+    file_ids: Optional[List[str]] = None  # Support for multiple files
     question: str
     data_source: str = "auto"  # "auto", "database", "csv", or "csv_sql"
     user_preference: Optional[str] = None  # "sql" or "python" for user preference
@@ -33,6 +34,7 @@ class QueryResponse(BaseModel):
     data: list = []
     columns: list = []
     row_count: int = 0
+    ai_routing: Optional[dict] = None  # AI routing information for CSV queries
 
 
 # --- Helper Function to format the agent's response ---
@@ -69,6 +71,8 @@ async def ask_question(
             "endpoint": "query",
             "data_source": request.data_source,
             "has_file_id": bool(request.file_id),
+            "has_file_ids": bool(request.file_ids),
+            "file_count": len(request.file_ids) if request.file_ids else 0,
             "has_connection_id": bool(request.connection_id),
             "question_length": len(request.question),
             "user_preference": request.user_preference
@@ -77,8 +81,19 @@ async def ask_question(
         try:
             logger.info(f"Processing query request: {request.question[:100]}...")
             
-            # Automatic AI routing: If CSV file is provided, AI agent decides the best service
-            if request.file_id:
+            # Automatic AI routing: If CSV file(s) are provided, AI agent decides the best service
+            if request.file_id or request.file_ids:
+                # Handle both single file (file_id) and multiple files (file_ids)
+                if request.file_id and request.file_ids:
+                    # If both are provided, combine them and remove duplicates
+                    all_file_ids = list(set([request.file_id] + request.file_ids))
+                    request.file_ids = all_file_ids
+                    request.file_id = None  # Clear single file_id to avoid confusion
+                elif request.file_id and not request.file_ids:
+                    # Convert single file_id to file_ids for consistent handling
+                    request.file_ids = [request.file_id]
+                    request.file_id = None
+                
                 result = await handle_ai_routing(request, db, current_user)
             else:
                 # No CSV file: Go directly to database analysis (no AI routing)
@@ -113,7 +128,7 @@ async def ask_question(
 async def handle_ai_routing(request: QueryRequest, db: Session, current_user) -> QueryResponse:
     """
     Handle automatic AI-powered intelligent routing using the AI routing agent.
-    This is automatically triggered when a CSV file is provided.
+    This uses the multi-file intelligent routing to select optimal files and services.
     """
     from services.ai_routing_agent import ai_routing_agent, AnalysisContext
     from db.models import UploadedFile
@@ -123,39 +138,52 @@ async def handle_ai_routing(request: QueryRequest, db: Session, current_user) ->
     
     try:
         logger.info(f"🤖 AI Agent processing question: {request.question[:100]}...")
+        logger.info(f"📁 Available files: {request.file_ids}")
         
-        # Get file information if file_id is provided
+        # Get file information for context
         file_size = None
-        if request.file_id:
+        if request.file_ids and len(request.file_ids) > 0:
+            # Get size of first file for context (AI will decide which files to use)
             uploaded_file = db.query(UploadedFile).filter(
-                UploadedFile.id == request.file_id
+                UploadedFile.id == request.file_ids[0]
             ).first()
             
             if uploaded_file:
-                # Estimate file size (this is approximate)
                 file_size = uploaded_file.file_size if hasattr(uploaded_file, 'file_size') else None
         
-        # Create analysis context (always CSV data since this handler is only called for CSV files)
+        # Create analysis context
         context = AnalysisContext(
             question=request.question,
             file_size=file_size,
-            data_source="csv",  # Always CSV since this handler is only called when file_id is provided
+            data_source="csv",
             user_preference=request.user_preference
         )
         
-        # Get AI recommendation
-        ai_result = await ai_routing_agent.analyze_and_route(request.question, context)
+        # Use intelligent multi-file routing - AI will select which files to use
+        ai_result = await ai_routing_agent.route_intelligent_multi_file_analysis(
+            question=request.question,
+            file_ids=request.file_ids,
+            context=context
+        )
         
         recommended_service = ai_result["recommended_service"]
+        required_files = ai_result["required_files"]
         reasoning = ai_result["reasoning"]
         confidence = ai_result["confidence"]
         ai_analysis = ai_result.get("ai_analysis", "unknown")
+        optimization_applied = ai_result.get("optimization_applied", False)
         
         logger.info(f"🤖 AI Agent recommendation: {recommended_service} (confidence: {confidence:.2f})")
         logger.info(f"🧠 AI Analysis: {ai_analysis}")
         logger.info(f"💭 AI Reasoning: {reasoning}")
+        logger.info(f"📁 Files selected by AI: {required_files}")
+        if optimization_applied:
+            logger.info(f"⚡ AI optimization: Using {len(required_files)} files instead of {len(request.file_ids)}")
         
-        # Route to the AI-recommended service (only CSV services)
+        # Update request with AI-selected files
+        request.file_ids = required_files
+        
+        # Route to the AI-recommended service with selected files
         if recommended_service == "data_analysis_service":
             logger.info("🤖 AI routing to data analysis service (pandas)")
             return await handle_data_analysis_query(request, db, current_user)
@@ -175,7 +203,7 @@ async def handle_ai_routing(request: QueryRequest, db: Session, current_user) ->
 
 async def handle_data_analysis_query(request: QueryRequest, db: Session, current_user) -> QueryResponse:
     """
-    Handle data analysis queries using the data analysis service with file validation.
+    Handle data analysis queries using the data analysis service with intelligent multi-file support.
     """
     from services.data_analysis_service import data_analysis_service
     from db.models import UploadedFile
@@ -183,40 +211,55 @@ async def handle_data_analysis_query(request: QueryRequest, db: Session, current
     
     logger = logging.getLogger(__name__)
     
-    if not request.file_id:
-        raise HTTPException(status_code=400, detail="file_id is required for data analysis queries")
+    # Support both single file (file_id) and multiple files (file_ids)
+    file_ids = []
+    if request.file_ids:
+        file_ids = request.file_ids
+    elif request.file_id:
+        file_ids = [request.file_id]
+    else:
+        raise HTTPException(status_code=400, detail="Either file_id or file_ids is required for data analysis queries")
     
     try:
-        logger.info(f"Processing data analysis query for file_id: {request.file_id}")
+        logger.info(f"Processing intelligent data analysis query for {len(file_ids)} files: {file_ids}")
         
-        # Validate file exists in database first
-        uploaded_file = db.query(UploadedFile).filter(
-            UploadedFile.id == request.file_id
-        ).first()
-        
-        if not uploaded_file:
-            logger.error(f"File not found in database: {request.file_id}")
-            raise HTTPException(
-                status_code=404, 
-                detail=f"File with ID {request.file_id} not found. Please ensure the file was uploaded successfully."
-            )
-        
-        logger.info(f"File found in database: {uploaded_file.original_filename}")
-        
-        # Validate file URL exists
-        if not uploaded_file.file_url:
-            logger.error(f"File URL is empty for file_id: {request.file_id}")
-            raise HTTPException(
-                status_code=400, 
-                detail="File URL is not available. Please re-upload the file."
-            )
+        # Validate all files exist in database first
+        uploaded_files = []
+        for file_id in file_ids:
+            uploaded_file = db.query(UploadedFile).filter(
+                UploadedFile.id == file_id
+            ).first()
+            
+            if not uploaded_file:
+                logger.error(f"File not found in database: {file_id}")
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"File with ID {file_id} not found. Please ensure the file was uploaded successfully."
+                )
+            
+            # Validate file URL exists
+            if not uploaded_file.file_url:
+                logger.error(f"File URL is empty for file_id: {file_id}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"File URL is not available for {uploaded_file.original_filename}. Please re-upload the file."
+                )
+            
+            uploaded_files.append(uploaded_file)
+            logger.info(f"File validated: {uploaded_file.original_filename}")
         
         # Track user activity for proactive cache refresh
         from core.redis_service import redis_service
-        redis_service.track_user_activity(str(current_user.id), request.file_id)
+        for file_id in file_ids:
+            redis_service.track_user_activity(str(current_user.id), file_id)
         
-        # Process data analysis query with Redis caching
-        result = await data_analysis_service.process_query(request.question, request.file_id, str(current_user.id))
+        # Use intelligent multi-file processing
+        result = await data_analysis_service.process_intelligent_query(
+            file_ids=file_ids,
+            question=request.question,
+            user_id=str(current_user.id),
+            user_preference=request.user_preference
+        )
         
         # Convert to QueryResponse format
         return QueryResponse(
@@ -224,19 +267,25 @@ async def handle_data_analysis_query(request: QueryRequest, db: Session, current
             sql_query="",  # Data analysis queries don't generate SQL
             data=result["data"],
             columns=result["columns"],
-            row_count=result["row_count"]
+            row_count=result["row_count"],
+            ai_routing={
+                "service_used": "data_analysis_service",
+                "reasoning": result.get("ai_routing_info", {}).get("reasoning", "Intelligent multi-file analysis"),
+                "confidence": result.get("ai_routing_info", {}).get("confidence", 0.9)
+            }
         )
         
     except HTTPException:
         # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        logger.error(f"Unexpected error processing data analysis query for file_id {request.file_id}: {e}")
+        logger.error(f"Unexpected error processing data analysis query for files {file_ids}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process data analysis query: {str(e)}")
 
 async def handle_csv_sql_query(request: QueryRequest, db: Session, current_user) -> QueryResponse:
     """
     Handle SQL queries on CSV data using in-memory SQLite.
+    Now supports both single-file and multi-file analysis with JOINs.
     """
     from services.csv_to_sql_converter import csv_to_sql_converter
     from services.data_analysis_service import data_analysis_service
@@ -246,65 +295,135 @@ async def handle_csv_sql_query(request: QueryRequest, db: Session, current_user)
     
     logger = logging.getLogger(__name__)
     
-    if not request.file_id:
-        raise HTTPException(status_code=400, detail="file_id is required for CSV SQL queries")
+    # Support both single file (file_id) and multiple files (file_ids)
+    # Now we process ALL selected files for multi-file SQL operations
+    file_ids = []
+    if request.file_ids and len(request.file_ids) > 0:
+        file_ids = request.file_ids
+        logger.info(f"Multi-file SQL query requested for {len(file_ids)} files: {file_ids}")
+    elif request.file_id:
+        file_ids = [request.file_id]
+        logger.info(f"Single-file SQL query requested for file: {request.file_id}")
+    else:
+        raise HTTPException(status_code=400, detail="Either file_id or file_ids is required for CSV SQL queries")
     
     try:
-        logger.info(f"Processing CSV SQL query for file_id: {request.file_id}")
+        logger.info(f"Processing CSV SQL query for {len(file_ids)} files: {file_ids}")
         
-        # Validate file exists in database first
-        uploaded_file = db.query(UploadedFile).filter(
-            UploadedFile.id == request.file_id
-        ).first()
+        # Validate all files exist in database first
+        uploaded_files = []
+        for file_id in file_ids:
+            uploaded_file = db.query(UploadedFile).filter(
+                UploadedFile.id == file_id
+            ).first()
+            
+            if not uploaded_file:
+                logger.error(f"File not found in database: {file_id}")
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"File with ID {file_id} not found. Please ensure the file was uploaded successfully."
+                )
+            
+            if not uploaded_file.file_url:
+                logger.error(f"File URL is empty for file_id: {file_id}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"File URL is not available for {uploaded_file.original_filename}. Please re-upload the file."
+                )
+            
+            uploaded_files.append(uploaded_file)
         
-        if not uploaded_file:
-            logger.error(f"File not found in database: {request.file_id}")
-            raise HTTPException(
-                status_code=404, 
-                detail=f"File with ID {request.file_id} not found. Please ensure the file was uploaded successfully."
-            )
-        
-        logger.info(f"File found in database: {uploaded_file.original_filename}")
-        
-        # Validate file URL exists
-        if not uploaded_file.file_url:
-            logger.error(f"File URL is empty for file_id: {request.file_id}")
-            raise HTTPException(
-                status_code=400, 
-                detail="File URL is not available. Please re-upload the file."
-            )
+        logger.info(f"All {len(uploaded_files)} files validated successfully")
         
         # Track user activity for proactive cache refresh
         from core.redis_service import redis_service
-        redis_service.track_user_activity(str(current_user.id), request.file_id)
+        for file_id in file_ids:
+            redis_service.track_user_activity(str(current_user.id), file_id)
         
-        # Get CSV data using existing DataAnalysisService with Redis caching
-        df = await data_analysis_service._get_csv_data(request.file_id, str(current_user.id))
-        if df is None:
-            raise HTTPException(status_code=404, detail="CSV file not found or could not be loaded")
-        
-        # Convert CSV to SQLite table with Redis caching
-        table_name = await csv_to_sql_converter.convert_csv_to_sql(request.file_id, df.to_csv(), str(current_user.id))
-        
-        # Get schema information for SQL generation
-        schema_info = await csv_to_sql_converter.get_table_schema(request.file_id)
-        
-        # Generate SQL query using existing TextToSQLService
-        # Create a schema string that TextToSQLService can understand
-        schema_string = f"Table: {table_name}\nColumns:\n"
-        for col in schema_info["columns"]:
-            schema_string += f"- {col['name']} ({col['type']})\n"
-        
-        # Add sample data for better context
-        if schema_info["sample_data"]:
-            schema_string += "\nSample data:\n"
-            for i, row in enumerate(schema_info["sample_data"][:3]):  # First 3 rows
-                schema_string += f"Row {i+1}: {row}\n"
-        
-        sql_query = text_to_sql_service.generate_sql(request.question, schema_string)
-        
-        # Execute SQL on CSV data
-        result = await csv_to_sql_converter.execute_sql_query(request.file_id, sql_query)
+        # Determine if this is single-file or multi-file operation
+        if len(file_ids) == 1:
+            # Single file operation (existing logic)
+            file_id = file_ids[0]
+            logger.info(f"Processing single-file SQL query for: {uploaded_files[0].original_filename}")
+            
+            # Get CSV data using existing DataAnalysisService with Redis caching
+            df = await data_analysis_service._get_csv_data(file_id, str(current_user.id))
+            if df is None:
+                raise HTTPException(status_code=404, detail="CSV file not found or could not be loaded")
+            
+            # Convert CSV to SQLite table with Redis caching
+            table_name = await csv_to_sql_converter.convert_csv_to_sql(file_id, df.to_csv(), str(current_user.id))
+            
+            # Get schema information for SQL generation
+            schema_info = await csv_to_sql_converter.get_table_schema(file_id)
+            
+            # Generate SQL query using existing TextToSQLService
+            schema_string = f"Table: {table_name}\nColumns:\n"
+            for col in schema_info["columns"]:
+                schema_string += f"- {col['name']} ({col['type']})\n"
+            
+            # Add sample data for better context
+            if schema_info["sample_data"]:
+                schema_string += "\nSample data:\n"
+                for i, row in enumerate(schema_info["sample_data"][:3]):
+                    schema_string += f"Row {i+1}: {row}\n"
+            
+            sql_query = text_to_sql_service.generate_sql(request.question, schema_string)
+            
+            # Execute SQL on CSV data
+            result = await csv_to_sql_converter.execute_sql_query(file_id, sql_query)
+            
+        else:
+            # Multi-file operation (new logic)
+            logger.info(f"Processing multi-file SQL query across {len(file_ids)} files")
+            
+            # Get CSV data for all files
+            csv_data_dict = {}
+            for file_id in file_ids:
+                df = await data_analysis_service._get_csv_data(file_id, str(current_user.id))
+                if df is None:
+                    raise HTTPException(status_code=404, detail=f"CSV file {file_id} not found or could not be loaded")
+                csv_data_dict[file_id] = df.to_csv()
+            
+            # Convert multiple CSVs to SQLite tables in single database
+            conversion_result = await csv_to_sql_converter.convert_multiple_csvs_to_sql(
+                file_ids, csv_data_dict, str(current_user.id)
+            )
+            
+            session_id = conversion_result["session_id"]
+            table_names = conversion_result["table_names"]
+            
+            logger.info(f"Created multi-file session {session_id} with tables: {list(table_names.values())}")
+            
+            # Get comprehensive schema information for all tables
+            multi_file_schema = await csv_to_sql_converter.get_multi_file_schema(session_id)
+            
+            # Generate comprehensive schema string for multi-file SQL generation
+            schema_string = f"Multi-file database with {len(table_names)} tables:\n\n"
+            
+            for file_id, table_info in multi_file_schema["tables"].items():
+                table_name = table_info["table_name"]
+                schema_string += f"Table: {table_name} (File: {uploaded_files[0].original_filename if file_id == file_ids[0] else '...'})\n"
+                schema_string += f"Rows: {table_info['row_count']}\nColumns:\n"
+                
+                for col in table_info["columns"]:
+                    schema_string += f"  - {col['name']} ({col['type']})\n"
+                
+                # Add sample data for better context
+                if table_info["sample_data"]:
+                    schema_string += f"Sample data from {table_name}:\n"
+                    for i, row in enumerate(table_info["sample_data"][:2]):  # First 2 rows per table
+                        schema_string += f"  Row {i+1}: {row}\n"
+                
+                schema_string += "\n"
+            
+            # Add relationship hints for multi-file queries
+            schema_string += "Note: You can JOIN tables using common column names or create cross-table comparisons.\n"
+            
+            sql_query = text_to_sql_service.generate_sql(request.question, schema_string)
+            
+            # Execute SQL on multi-file data
+            result = await csv_to_sql_converter.execute_multi_file_sql_query(session_id, sql_query)
         
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["error"])
@@ -324,7 +443,7 @@ async def handle_csv_sql_query(request: QueryRequest, db: Session, current_user)
         # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        logger.error(f"Unexpected error processing CSV SQL query for file_id {request.file_id}: {e}")
+        logger.error(f"Unexpected error processing CSV SQL query for files {file_ids}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process CSV SQL query: {str(e)}")
 
 async def handle_database_query(request: QueryRequest, db: Session) -> QueryResponse:

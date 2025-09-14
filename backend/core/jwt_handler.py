@@ -16,8 +16,8 @@ if not SECRET_KEY:
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
-)  # Increased to 60 minutes
+    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "360")
+)  # Increased to 6 hours (360 minutes)
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
 

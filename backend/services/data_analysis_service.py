@@ -1161,5 +1161,659 @@ Response:"""
             self.schema_cache.clear()
             logger.info("All cache cleared")
 
+    # --- Multi-File Analysis Methods ---
+    
+    async def process_intelligent_query(
+        self, 
+        file_ids: List[str], 
+        question: str, 
+        user_id: str = None,
+        user_preference: str = None,
+        force_multi_file: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Process a natural language question with intelligent file selection and routing.
+        
+        This method:
+        1. Analyzes the question to determine optimal file combination
+        2. Selects only necessary files for the analysis
+        3. Chooses between single-file and multi-file analysis
+        4. Routes to appropriate service (SQL vs pandas)
+        
+        Args:
+            file_ids: List of available file IDs
+            question: Natural language question
+            user_id: User ID for Redis cache lookup
+            user_preference: User preference ('sql' or 'python')
+            force_multi_file: Force multi-file analysis even if single file could work
+            
+        Returns:
+            Dictionary containing query results and metadata
+        """
+        try:
+            logger.info(f"Processing intelligent query: '{question}' for {len(file_ids)} files")
+            
+            # Step 1: AI analyzes question complexity and determines optimal approach
+            analysis_plan = await self._analyze_question_complexity(
+                question, file_ids, user_preference, force_multi_file
+            )
+            
+            logger.info(f"AI analysis plan: {analysis_plan}")
+            
+            # Step 2: Load only required files
+            required_files = analysis_plan['required_files']
+            dataframes = await self._load_required_files(required_files, user_id)
+            
+            # Step 3: Perform optimal analysis based on AI decision
+            if analysis_plan['analysis_type'] == 'sql':
+                result = await self._sql_analysis(dataframes, question, analysis_plan)
+            else:
+                result = await self._pandas_analysis(dataframes, question, analysis_plan)
+            
+            # Step 4: Add AI routing information to result
+            result['files_used'] = required_files
+            result['analysis_type'] = analysis_plan['analysis_type']
+            result['ai_routing_info'] = {
+                'reasoning': analysis_plan['reasoning'],
+                'confidence': analysis_plan['confidence'],
+                'files_analyzed': len(file_ids),
+                'files_used': len(required_files),
+                'optimization_applied': len(required_files) < len(file_ids)
+            }
+            
+            logger.info(f"Intelligent query processed successfully using {len(required_files)} files")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error processing intelligent query: {e}")
+            raise
+    
+    async def _analyze_question_complexity(
+        self, 
+        question: str, 
+        available_files: List[str], 
+        user_preference: str = None,
+        force_multi_file: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Use AI to analyze question complexity and determine optimal file combination.
+        
+        Args:
+            question: Natural language question
+            available_files: List of available file IDs
+            user_preference: User preference ('sql' or 'python')
+            force_multi_file: Force multi-file analysis
+            
+        Returns:
+            Analysis plan with required files and approach
+        """
+        try:
+            # Get schema information for all available files
+            schemas_info = {}
+            for file_id in available_files:
+                schema_info = await self.analyze_data_schema(file_id)
+                schemas_info[file_id] = schema_info
+            
+            # Create enhanced prompt for AI analysis
+            prompt = f"""
+You are an expert data analyst who determines the optimal approach for analyzing CSV data.
+
+QUESTION: {question}
+
+AVAILABLE FILES AND THEIR SCHEMAS:
+{self._format_schemas_for_ai(schemas_info)}
+
+USER PREFERENCE: {user_preference or 'none specified'}
+
+ANALYSIS REQUIREMENTS:
+1. Determine if this question can be answered with a single file or requires multiple files
+2. Identify which specific files are needed (if not all)
+3. Decide between SQL analysis (csv_to_sql_converter) or pandas analysis (data_analysis_service)
+4. Consider data relationships and JOIN requirements
+
+DECISION CRITERIA:
+- Single file sufficient: Questions about one dataset (e.g., "What's the total sales?", "Show me top products")
+- Multiple files needed: Questions requiring data from multiple sources (e.g., "Compare sales between regions", "Customer lifetime value by segment")
+- SQL approach: Structured queries, aggregations, JOINs, filtering
+- Pandas approach: Complex data manipulation, statistical analysis, custom transformations
+
+RESPONSE FORMAT (JSON):
+{{
+    "required_files": ["file_id1", "file_id2"],
+    "analysis_type": "sql" or "pandas",
+    "reasoning": "Explanation of decision",
+    "confidence": 0.0-1.0,
+    "join_strategy": "inner" or "left" or "right" or "full" or "none",
+    "optimization_applied": true/false
+}}
+
+RESPONSE:"""
+            
+            # Use LLM to analyze question complexity
+            response = await self.llm.ainvoke(prompt)
+            analysis_plan = json.loads(response.content.strip())
+            
+            # Validate analysis plan
+            if not analysis_plan.get('required_files'):
+                analysis_plan['required_files'] = available_files[:1]  # Fallback to first file
+            
+            if analysis_plan['required_files'] not in available_files:
+                # Ensure all required files are actually available
+                analysis_plan['required_files'] = [
+                    f for f in analysis_plan['required_files'] 
+                    if f in available_files
+                ]
+            
+            # Force multi-file if requested
+            if force_multi_file and len(analysis_plan['required_files']) == 1:
+                analysis_plan['required_files'] = available_files
+                analysis_plan['reasoning'] += " (Forced multi-file analysis)"
+            
+            return analysis_plan
+            
+        except Exception as e:
+            logger.error(f"Error analyzing question complexity: {e}")
+            # Fallback to single file analysis
+            return {
+                'required_files': available_files[:1],
+                'analysis_type': 'pandas',
+                'reasoning': f'Fallback due to error: {str(e)}',
+                'confidence': 0.5,
+                'join_strategy': 'none',
+                'optimization_applied': False
+            }
+    
+    async def _load_required_files(self, file_ids: List[str], user_id: str = None) -> Dict[str, pd.DataFrame]:
+        """
+        Load only the required CSV files.
+        
+        Args:
+            file_ids: List of file IDs to load
+            user_id: User ID for Redis cache lookup
+            
+        Returns:
+            Dictionary mapping file_id to DataFrame
+        """
+        try:
+            dataframes = {}
+            
+            for file_id in file_ids:
+                df = await self._get_csv_data(file_id, user_id)
+                if df is not None:
+                    dataframes[file_id] = df
+                else:
+                    logger.warning(f"Could not load CSV data for file_id: {file_id}")
+            
+            if not dataframes:
+                raise ValueError("No CSV data could be loaded from the required files")
+            
+            logger.info(f"Loaded {len(dataframes)} CSV files successfully")
+            return dataframes
+            
+        except Exception as e:
+            logger.error(f"Error loading required files: {e}")
+            raise
+    
+    async def _sql_analysis(
+        self, 
+        dataframes: Dict[str, pd.DataFrame], 
+        question: str, 
+        analysis_plan: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Perform SQL-based analysis on multiple DataFrames.
+        
+        Args:
+            dataframes: Dictionary mapping file_id to DataFrame
+            question: Natural language question
+            analysis_plan: AI analysis plan
+            
+        Returns:
+            Formatted analysis result
+        """
+        try:
+            # Import CSV to SQL converter
+            from services.csv_to_sql_converter import csv_to_sql_converter
+            
+            # Convert DataFrames to SQLite tables
+            table_names = {}
+            for file_id, df in dataframes.items():
+                table_name = await csv_to_sql_converter.convert_dataframe_to_sql(df, file_id)
+                table_names[file_id] = table_name
+            
+            # Generate SQL query for multiple tables
+            sql_query = await self._generate_multi_table_sql_query(
+                question, table_names, analysis_plan
+            )
+            
+            # Execute SQL query (assuming first table for now - will enhance later)
+            first_file_id = list(dataframes.keys())[0]
+            result = await csv_to_sql_converter.execute_sql_query(first_file_id, sql_query)
+            
+            # Format result
+            formatted_result = self._format_query_result(result, question)
+            
+            logger.info(f"SQL analysis completed successfully")
+            return formatted_result
+            
+        except Exception as e:
+            logger.error(f"Error in SQL analysis: {e}")
+            raise
+    
+    async def _pandas_analysis(
+        self, 
+        dataframes: Dict[str, pd.DataFrame], 
+        question: str, 
+        analysis_plan: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Perform pandas-based analysis on multiple DataFrames.
+        
+        Args:
+            dataframes: Dictionary mapping file_id to DataFrame
+            question: Natural language question
+            analysis_plan: AI analysis plan
+            
+        Returns:
+            Formatted analysis result
+        """
+        try:
+            if len(dataframes) == 1:
+                # Single file analysis
+                df = list(dataframes.values())[0]
+                schema_info = await self.analyze_data_schema(list(dataframes.keys())[0])
+                pandas_query = await self._generate_pandas_query(question, schema_info)
+                result = self._execute_pandas_query(pandas_query, df)
+            else:
+                # Multi-file analysis
+                result = await self._execute_multi_file_pandas_analysis(
+                    dataframes, question, analysis_plan
+                )
+            
+            # Format result
+            formatted_result = self._format_query_result(result, question)
+            
+            logger.info(f"Pandas analysis completed successfully")
+            return formatted_result
+            
+        except Exception as e:
+            logger.error(f"Error in pandas analysis: {e}")
+            raise
+    
+    async def _execute_multi_file_pandas_analysis(
+        self, 
+        dataframes: Dict[str, pd.DataFrame], 
+        question: str, 
+        analysis_plan: Dict[str, Any]
+    ) -> Any:
+        """
+        Execute pandas analysis on multiple DataFrames.
+        
+        Args:
+            dataframes: Dictionary mapping file_id to DataFrame
+            question: Natural language question
+            analysis_plan: AI analysis plan
+            
+        Returns:
+            Analysis result
+        """
+        try:
+            # Create combined schema information
+            combined_schema = await self._create_combined_schema(dataframes)
+            
+            # Generate pandas query for multiple DataFrames
+            pandas_query = await self._generate_multi_file_pandas_query(
+                question, dataframes, combined_schema, analysis_plan
+            )
+            
+            # Execute query safely
+            result = self._execute_multi_file_pandas_query(pandas_query, dataframes)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error executing multi-file pandas analysis: {e}")
+            raise
+    
+    async def analyze_combined_schema(self, schemas_info: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Analyze and combine schemas from multiple files.
+        
+        Args:
+            schemas_info: Dictionary mapping file_id to schema info
+            
+        Returns:
+            Combined schema information
+        """
+        try:
+            combined_schema = {
+                "total_files": len(schemas_info),
+                "files": {},
+                "common_columns": [],
+                "unique_columns": {},
+                "data_types": {},
+                "total_rows": 0,
+                "join_candidates": []
+            }
+            
+            all_columns = set()
+            column_files = {}
+            
+            # Analyze each file's schema
+            for file_id, schema in schemas_info.items():
+                file_info = {
+                    "columns": schema["columns"],
+                    "row_count": schema["file_info"]["row_count"],
+                    "column_count": schema["file_info"]["column_count"]
+                }
+                combined_schema["files"][file_id] = file_info
+                combined_schema["total_rows"] += schema["file_info"]["row_count"]
+                
+                # Track columns across files
+                for col in schema["columns"]:
+                    col_name = col["name"]
+                    all_columns.add(col_name)
+                    
+                    if col_name not in column_files:
+                        column_files[col_name] = []
+                    column_files[col_name].append(file_id)
+            
+            # Identify common and unique columns
+            for col_name, files in column_files.items():
+                if len(files) > 1:
+                    combined_schema["common_columns"].append(col_name)
+                else:
+                    file_id = files[0]
+                    if file_id not in combined_schema["unique_columns"]:
+                        combined_schema["unique_columns"][file_id] = []
+                    combined_schema["unique_columns"][file_id].append(col_name)
+            
+            # Identify potential JOIN candidates
+            for col_name in combined_schema["common_columns"]:
+                if col_name.lower() in ['id', 'key', 'name', 'date', 'time']:
+                    combined_schema["join_candidates"].append(col_name)
+            
+            logger.info(f"Combined schema analysis completed for {len(schemas_info)} files")
+            return combined_schema
+            
+        except Exception as e:
+            logger.error(f"Error analyzing combined schema: {e}")
+            raise
+    
+    def _format_schemas_for_ai(self, schemas_info: Dict[str, Dict[str, Any]]) -> str:
+        """
+        Format schema information for AI analysis.
+        
+        Args:
+            schemas_info: Dictionary mapping file_id to schema info
+            
+        Returns:
+            Formatted schema string
+        """
+        try:
+            schema_text = ""
+            
+            for file_id, schema in schemas_info.items():
+                schema_text += f"\nFILE: {file_id}\n"
+                schema_text += f"Rows: {schema['file_info']['row_count']}, Columns: {schema['file_info']['column_count']}\n"
+                schema_text += "Columns:\n"
+                
+                for col in schema["columns"]:
+                    schema_text += f"  - {col['name']} ({col['type']}): "
+                    schema_text += f"Sample: {col['sample_values'][:3]}, "
+                    schema_text += f"Nulls: {col['null_count']}, "
+                    schema_text += f"Unique: {col['unique_count']}\n"
+                
+                schema_text += "\n"
+            
+            return schema_text
+            
+        except Exception as e:
+            logger.error(f"Error formatting schemas for AI: {e}")
+            return "Schema information unavailable"
+    
+    async def _create_combined_schema(self, dataframes: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """
+        Create combined schema information from multiple DataFrames.
+        
+        Args:
+            dataframes: Dictionary mapping file_id to DataFrame
+            
+        Returns:
+            Combined schema information
+        """
+        try:
+            combined_schema = {
+                "total_files": len(dataframes),
+                "files": {},
+                "common_columns": [],
+                "unique_columns": {},
+                "total_rows": 0
+            }
+            
+            all_columns = set()
+            column_files = {}
+            
+            # Analyze each DataFrame
+            for file_id, df in dataframes.items():
+                file_info = {
+                    "columns": list(df.columns),
+                    "row_count": len(df),
+                    "column_count": len(df.columns)
+                }
+                combined_schema["files"][file_id] = file_info
+                combined_schema["total_rows"] += len(df)
+                
+                # Track columns across files
+                for col in df.columns:
+                    all_columns.add(col)
+                    
+                    if col not in column_files:
+                        column_files[col] = []
+                    column_files[col].append(file_id)
+            
+            # Identify common and unique columns
+            for col_name, files in column_files.items():
+                if len(files) > 1:
+                    combined_schema["common_columns"].append(col_name)
+                else:
+                    file_id = files[0]
+                    if file_id not in combined_schema["unique_columns"]:
+                        combined_schema["unique_columns"][file_id] = []
+                    combined_schema["unique_columns"][file_id].append(col_name)
+            
+            return combined_schema
+            
+        except Exception as e:
+            logger.error(f"Error creating combined schema: {e}")
+            raise
+    
+    async def _generate_multi_file_pandas_query(
+        self, 
+        question: str, 
+        dataframes: Dict[str, pd.DataFrame], 
+        combined_schema: Dict[str, Any],
+        analysis_plan: Dict[str, Any]
+    ) -> str:
+        """
+        Generate pandas query for multiple DataFrames.
+        
+        Args:
+            question: Natural language question
+            dataframes: Dictionary mapping file_id to DataFrame
+            combined_schema: Combined schema information
+            analysis_plan: AI analysis plan
+            
+        Returns:
+            Generated pandas query
+        """
+        try:
+            # Create enhanced prompt for multi-file pandas query generation
+            prompt = f"""
+You are an expert data analyst who generates pandas code for analyzing multiple CSV files.
+
+QUESTION: {question}
+
+AVAILABLE DATAFRAMES:
+{self._format_dataframes_for_ai(dataframes)}
+
+COMBINED SCHEMA:
+- Total files: {combined_schema['total_files']}
+- Total rows: {combined_schema['total_rows']}
+- Common columns: {combined_schema['common_columns']}
+- Unique columns per file: {combined_schema['unique_columns']}
+
+ANALYSIS PLAN:
+- Join strategy: {analysis_plan.get('join_strategy', 'none')}
+- Analysis type: {analysis_plan.get('analysis_type', 'pandas')}
+
+REQUIREMENTS:
+1. Generate pandas code that answers the question using the available DataFrames
+2. Use appropriate JOIN operations if needed
+3. Handle data type conversions and missing values
+4. Optimize for performance
+5. Return only the pandas code, no explanations
+
+DATAFRAME VARIABLES:
+{self._get_dataframe_variables(dataframes)}
+
+RESPONSE (pandas code only):"""
+            
+            # Use LLM to generate pandas query
+            response = await self.llm.ainvoke(prompt)
+            pandas_query = response.content.strip()
+            
+            logger.info(f"Generated multi-file pandas query: {len(pandas_query)} characters")
+            return pandas_query
+            
+        except Exception as e:
+            logger.error(f"Error generating multi-file pandas query: {e}")
+            raise
+    
+    def _execute_multi_file_pandas_query(self, pandas_query: str, dataframes: Dict[str, pd.DataFrame]) -> Any:
+        """
+        Execute pandas query on multiple DataFrames safely.
+        
+        Args:
+            pandas_query: Generated pandas query
+            dataframes: Dictionary mapping file_id to DataFrame
+            
+        Returns:
+            Query result
+        """
+        try:
+            # Create safe execution environment
+            safe_globals = {
+                'pd': pd,
+                'np': np,
+                'len': len,
+                'sum': sum,
+                'max': max,
+                'min': min,
+                'mean': np.mean,
+                'std': np.std,
+                'var': np.var,
+                'count': lambda x: len(x) if hasattr(x, '__len__') else 1,
+                'abs': abs,
+                'round': round,
+                'str': str,
+                'int': int,
+                'float': float,
+                'bool': bool,
+                'list': list,
+                'dict': dict,
+                'set': set,
+                'tuple': tuple,
+                'enumerate': enumerate,
+                'zip': zip,
+                'range': range,
+                'sorted': sorted,
+                'reversed': reversed,
+                'any': any,
+                'all': all,
+                'isinstance': isinstance,
+                'type': type,
+                'print': print,
+                'datetime': datetime,
+                'date': datetime.date,
+                'time': datetime.time,
+                'timedelta': datetime.timedelta,
+            }
+            
+            # Add DataFrames to safe environment
+            for file_id, df in dataframes.items():
+                safe_globals[f'df_{file_id}'] = df
+                safe_globals[f'df_{file_id.replace("-", "_")}'] = df
+            
+            # Execute query safely
+            exec(pandas_query, safe_globals)
+            
+            # Get result from safe environment
+            result = safe_globals.get('result')
+            if result is None:
+                # Try to get the last expression result
+                result = safe_globals.get('_')
+            
+            logger.info(f"Multi-file pandas query executed successfully")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error executing multi-file pandas query: {e}")
+            raise
+    
+    def _format_dataframes_for_ai(self, dataframes: Dict[str, pd.DataFrame]) -> str:
+        """
+        Format DataFrame information for AI analysis.
+        
+        Args:
+            dataframes: Dictionary mapping file_id to DataFrame
+            
+        Returns:
+            Formatted DataFrame string
+        """
+        try:
+            df_text = ""
+            
+            for file_id, df in dataframes.items():
+                df_text += f"\nDataFrame: df_{file_id}\n"
+                df_text += f"Shape: {df.shape}\n"
+                df_text += f"Columns: {list(df.columns)}\n"
+                df_text += f"Data types:\n"
+                
+                for col, dtype in df.dtypes.items():
+                    df_text += f"  - {col}: {dtype}\n"
+                
+                df_text += f"Sample data (first 3 rows):\n"
+                df_text += str(df.head(3).to_string())
+                df_text += "\n\n"
+            
+            return df_text
+            
+        except Exception as e:
+            logger.error(f"Error formatting DataFrames for AI: {e}")
+            return "DataFrame information unavailable"
+    
+    def _get_dataframe_variables(self, dataframes: Dict[str, pd.DataFrame]) -> str:
+        """
+        Get DataFrame variable names for AI.
+        
+        Args:
+            dataframes: Dictionary mapping file_id to DataFrame
+            
+        Returns:
+            DataFrame variables string
+        """
+        try:
+            variables = []
+            for file_id in dataframes.keys():
+                variables.append(f"df_{file_id}")
+                variables.append(f"df_{file_id.replace('-', '_')}")
+            
+            return f"Available variables: {', '.join(variables)}"
+            
+        except Exception as e:
+            logger.error(f"Error getting DataFrame variables: {e}")
+            return "DataFrame variables unavailable"
+
 # Global instance
 data_analysis_service = DataAnalysisService()

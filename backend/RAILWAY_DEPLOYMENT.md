@@ -98,7 +98,7 @@ DATABASE_URL=postgresql://postgres:password@host:port/database
 
 # Security (REQUIRED)
 SECRET_KEY=your-super-secure-secret-key-32-chars-min
-ACCESS_TOKEN_EXPIRE_MINUTES=60
+ACCESS_TOKEN_EXPIRE_MINUTES=360
 REFRESH_TOKEN_EXPIRE_DAYS=7
 
 # API Configuration (REQUIRED)

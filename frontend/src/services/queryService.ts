@@ -53,6 +53,22 @@ const askCSVQuestion = async (
   return askQuestion(queryData);
 };
 
+// Multi-file CSV query function (intelligent AI routing)
+const askMultiCSVQuestion = async (
+  fileIds: string[], 
+  question: string, 
+  userPreference?: 'sql' | 'python'
+): Promise<QueryResponse> => {
+  const queryData: QueryRequest = {
+    file_ids: fileIds,
+    question: question,
+    user_preference: userPreference
+    // No data_source needed - AI routing is automatic
+  };
+  
+  return askQuestion(queryData);
+};
+
 // Database query function (no AI routing)
 const askDatabaseQuestion = async (connectionId: string, question: string): Promise<QueryResponse> => {
   const queryData: QueryRequest = {
@@ -66,6 +82,7 @@ const askDatabaseQuestion = async (connectionId: string, question: string): Prom
 
 export const queryService = {
   askQuestion,
-  askCSVQuestion,       // Automatic AI routing for CSV data
+  askCSVQuestion,       // Automatic AI routing for single CSV file
+  askMultiCSVQuestion,  // Intelligent AI routing for multiple CSV files
   askDatabaseQuestion   // Direct database queries (no AI routing)
 };

@@ -27,7 +27,7 @@ export const SimpleDataTable: React.FC<SimpleDataTableProps> = ({
   maxPreviewRows = 50,
   filename,
 }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const displayedRows = csvData.rows.slice(0, maxPreviewRows);
   const hasMoreRows = csvData.totalRows > maxPreviewRows;
 

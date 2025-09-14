@@ -64,14 +64,14 @@ class ResultFormatter:
     def _format_number(value: Union[int, float], question_lower: str) -> str:
         """Format numeric values with appropriate formatting."""
         if isinstance(value, float):
-            if "revenue" in question_lower or "total" in question_lower:
+            if "revenue" in question_lower or ("total" in question_lower and ("sales" in question_lower or "revenue" in question_lower or "amount" in question_lower)):
                 return f"${value:,.2f}"
             elif "average" in question_lower or "mean" in question_lower:
                 return f"${value:.2f}"
             else:
                 return f"{value:.2f}"
         else:  # integer
-            if "revenue" in question_lower or "total" in question_lower:
+            if "revenue" in question_lower or ("total" in question_lower and ("sales" in question_lower or "revenue" in question_lower or "amount" in question_lower)):
                 return f"${value:,}"
             elif "count" in question_lower or "number" in question_lower:
                 return f"{value:,}"
