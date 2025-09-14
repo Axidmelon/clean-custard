@@ -11,8 +11,9 @@ import { useFileUpload } from "@/contexts/FileUploadContext";
 import { signedUrlService } from "@/services/signedUrlService";
 import { csvCacheService } from "@/services/csvCacheService";
 import { SimpleChatEditor } from "@/components/blocknote/SimpleChatEditor";
-import { SimpleDataTable } from "@/components/blocknote/SimpleDataTable";
 import { RichTextDisplay } from "@/components/ui/RichTextDisplay";
+import { MultiFileSelector } from "@/components/MultiFileSelector";
+import { TabbedCsvPreview } from "@/components/TabbedCsvPreview";
 // import { APP_CONFIG } from "@/lib/constants";
 
 // Constants for CSV loading optimization
@@ -51,8 +52,8 @@ export default function TalkData() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
-  const [selectedCsvFileId, setSelectedCsvFileId] = useState<string>("");
-  const [csvData, setCsvData] = useState<CsvData | null>(null);
+  const [selectedCsvFileIds, setSelectedCsvFileIds] = useState<string[]>([]);
+  const [csvData, setCsvData] = useState<{ [fileId: string]: CsvData } | null>(null);
   const [isLoadingCsv, setIsLoadingCsv] = useState(false);
   const [csvLoadProgress, setCsvLoadProgress] = useState<CsvLoadProgress>({
     stage: 'complete',
@@ -60,6 +61,7 @@ export default function TalkData() {
     message: ''
   });
   const [csvLoadTimeout, setCsvLoadTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [loadingFiles, setLoadingFiles] = useState<Set<string>>(new Set());
   const [agentStatus, setAgentStatus] = useState<{ [connectionId: string]: boolean }>({});
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -94,16 +96,23 @@ export default function TalkData() {
     scrollToBottom();
   }, [messages]);
 
-  // Load CSV data when a CSV file is selected
+  // Load CSV data when CSV files are selected (load ALL selected files immediately)
   useEffect(() => {
-    if (selectedCsvFileId) {
-      loadCsvData(selectedCsvFileId);
-      // Cache the CSV file for processing
-      cacheCsvFileForProcessing(selectedCsvFileId);
+    if (selectedCsvFileIds.length > 0) {
+      // Load preview data for ALL selected files immediately
+      selectedCsvFileIds.forEach(fileId => {
+        if (!csvData?.[fileId] && !loadingFiles.has(fileId)) {
+          loadCsvData(fileId);
+        }
+      });
+      // Cache all selected CSV files for processing
+      selectedCsvFileIds.forEach(fileId => {
+        cacheCsvFileForProcessing(fileId);
+      });
     } else {
       setCsvData(null);
     }
-  }, [selectedCsvFileId, uploadedFiles]);
+  }, [selectedCsvFileIds]);
 
   // Note: Removed auto-selection logic - users must manually select files
 
@@ -226,8 +235,16 @@ export default function TalkData() {
   };
 
   const loadCsvData = async (fileId: string) => {
+    // Prevent multiple simultaneous requests for the same file
+    if (loadingFiles.has(fileId)) {
+      console.log('🔄 CSV already loading for file:', fileId);
+      return;
+    }
+    
+    // Add file to loading set
+    setLoadingFiles(prev => new Set(prev).add(fileId));
     setIsLoadingCsv(true);
-    setCsvData(null);
+    // Don't clear csvData - we want to preserve already loaded files
     
     // Clear any existing timeout
     if (csvLoadTimeout) {
@@ -287,7 +304,10 @@ export default function TalkData() {
           totalTime: `${(parseEndTime - startTime).toFixed(0)}ms`
         });
         
-        setCsvData(parsedData);
+        setCsvData(prev => ({
+          ...prev,
+          [fileId]: parsedData
+        }));
         
         setCsvLoadProgress({
           stage: 'complete',
@@ -358,7 +378,10 @@ export default function TalkData() {
             message: 'Rendering preview...'
           });
           
-          setCsvData(parsedData);
+          setCsvData(prev => ({
+          ...prev,
+          [fileId]: parsedData
+        }));
           
           setCsvLoadProgress({
             stage: 'complete',
@@ -403,7 +426,10 @@ export default function TalkData() {
               columns: parsedData.headers.length
             });
             
-            setCsvData(parsedData);
+            setCsvData(prev => ({
+          ...prev,
+          [fileId]: parsedData
+        }));
             
             setCsvLoadProgress({
               stage: 'complete',
@@ -437,13 +463,19 @@ export default function TalkData() {
         error: errorMessage
       });
       
-      setCsvData(null);
+      // Don't clear csvData on error - preserve already loaded files
     } finally {
       // Clear timeout
       if (csvLoadTimeout) {
         clearTimeout(csvLoadTimeout);
         setCsvLoadTimeout(null);
       }
+      // Remove file from loading set
+      setLoadingFiles(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(fileId);
+        return newSet;
+      });
       setIsLoadingCsv(false);
     }
   };
@@ -477,11 +509,11 @@ export default function TalkData() {
   };
 
   const handleSubmit = async (content: string, retryMessageId?: string) => {
-    if (!content.trim() || isLoading || (!selectedConnectionId && !selectedCsvFileId)) return;
+    if (!content.trim() || isLoading || (!selectedConnectionId && selectedCsvFileIds.length === 0)) return;
     
     // Ensure only one data source is selected
-    if (selectedConnectionId && selectedCsvFileId) {
-      throw new Error("Please select only one data source - either a CSV file or a database connection, not both.");
+    if (selectedConnectionId && selectedCsvFileIds.length > 0) {
+      throw new Error("Please select only one data source - either CSV files or a database connection, not both.");
     }
 
     const userMessage: Message = {
@@ -499,21 +531,26 @@ export default function TalkData() {
       let response: QueryResponse;
       
       // Simplified query logic - use AI routing for both file and database queries
-      if (selectedCsvFileId) {
-        const selectedFile = uploadedFiles.find(file => file.id === selectedCsvFileId);
-        if (!selectedFile) {
-          throw new Error("Selected file not found. Please select a valid file.");
-        }
-        if (selectedFile.status !== 'completed') {
-          throw new Error("File upload is still in progress. Please wait for it to complete.");
+      if (selectedCsvFileIds.length > 0) {
+        // Unified CSV file analysis (single or multiple files)
+        const selectedFiles = uploadedFiles.filter(file => selectedCsvFileIds.includes(file.id));
+        if (selectedFiles.length !== selectedCsvFileIds.length) {
+          throw new Error("Some selected files not found. Please select valid files.");
         }
         
-        console.log('🤖 Automatic AI routing for CSV file:', {
-          fileId: selectedCsvFileId,
-          filename: selectedFile.name
+        const incompleteFiles = selectedFiles.filter(file => file.status !== 'completed');
+        if (incompleteFiles.length > 0) {
+          throw new Error(`File uploads still in progress: ${incompleteFiles.map(f => f.name).join(', ')}`);
+        }
+        
+        console.log('🤖 Intelligent CSV analysis:', {
+          fileIds: selectedCsvFileIds,
+          filenames: selectedFiles.map(f => f.name),
+          fileCount: selectedCsvFileIds.length
         });
         
-        response = await queryService.askCSVQuestion(selectedCsvFileId, userMessage.content);
+        // Use intelligent multi-file query for both single and multiple files
+        response = await queryService.askMultiCSVQuestion(selectedCsvFileIds, userMessage.content);
       } else if (selectedConnectionId) {
         console.log('🗄️ Direct database query (no AI routing):', {
           connectionId: selectedConnectionId
@@ -696,36 +733,7 @@ export default function TalkData() {
           <div className="w-full">
             <div className="flex items-center gap-2 mb-2">
               <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium">CSV File:</span>
-            </div>
-            <div className="flex gap-2">
-              <select 
-                value={selectedCsvFileId} 
-                onChange={(e) => {
-                  setSelectedCsvFileId(e.target.value);
-                  // Clear database selection when CSV file is selected
-                  if (e.target.value) {
-                    setSelectedConnectionId("");
-                  }
-                }}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
-              >
-                <option value="">Select CSV file</option>
-                {uploadedFiles && uploadedFiles.length > 0 ? (
-                  uploadedFiles
-                    .filter(file => file.status === 'completed' && file.name.endsWith('.csv'))
-                    .map((file) => {
-                      const fileSizeKB = (file.size / 1024).toFixed(1);
-                      return (
-                        <option key={file.id} value={file.id}>
-                          {file.name} ({fileSizeKB} KB)
-                        </option>
-                      );
-                    })
-                ) : (
-                  <option disabled>No CSV files uploaded</option>
-                )}
-              </select>
+              <span className="text-sm font-medium">CSV Files:</span>
               <Button
                 variant="outline"
                 size="sm"
@@ -736,12 +744,27 @@ export default function TalkData() {
                     console.error('Failed to refresh files:', error);
                   }
                 }}
-                className="px-3 py-2"
+                className="px-2 py-1 h-6"
                 title="Refresh file list"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className="w-3 h-3" />
               </Button>
             </div>
+            
+            {/* Unified CSV File Selection */}
+            <MultiFileSelector
+              files={uploadedFiles.filter(file => file.status === 'completed' && file.name.endsWith('.csv'))}
+              selectedFileIds={selectedCsvFileIds}
+              onSelectionChange={(fileIds: string[]) => {
+                setSelectedCsvFileIds(fileIds);
+                // Clear database selection when CSV files are selected
+                if (fileIds.length > 0) {
+                  setSelectedConnectionId("");
+                }
+              }}
+              maxFiles={10}
+              className="w-full"
+            />
           </div>
 
           {/* Database Selection */}
@@ -756,7 +779,7 @@ export default function TalkData() {
                 setSelectedConnectionId(e.target.value);
                 // Clear CSV file selection when database is selected
                 if (e.target.value) {
-                  setSelectedCsvFileId("");
+                  setSelectedCsvFileIds([]);
                 }
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
@@ -795,7 +818,7 @@ export default function TalkData() {
 
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto scrollbar-hide space-y-4 pb-4 w-full max-w-full overflow-hidden">
-        {messages.length === 0 && !selectedCsvFileId && (
+        {messages.length === 0 && selectedCsvFileIds.length === 0 && !selectedConnectionId && (
           <div className="flex items-center justify-center h-64">
             <div className="text-center space-y-3">
               <div className="w-16 h-16 bg-primary-light rounded-full flex items-center justify-center mx-auto">
@@ -812,100 +835,18 @@ export default function TalkData() {
         )}
 
         {/* CSV Data Preview - Inside Messages Container */}
-        {selectedCsvFileId && (
+        {selectedCsvFileIds.length > 0 && (
           <div className="w-full overflow-hidden">
-            
-            {isLoadingCsv ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                  {csvLoadProgress.message}
-                </div>
-                
-                {/* Progress Bar */}
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${csvLoadProgress.progress}%` }}
-                  ></div>
-                </div>
-                
-                <div className="text-xs text-muted-foreground">
-                  {csvLoadProgress.progress}% complete
-                </div>
-                
-                {/* Stage indicator */}
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className={`px-2 py-1 rounded ${csvLoadProgress.stage === 'fetching_url' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'}`}>
-                    Getting URL
-                  </span>
-                  <span className={`px-2 py-1 rounded ${csvLoadProgress.stage === 'downloading' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'}`}>
-                    Downloading
-                  </span>
-                  <span className={`px-2 py-1 rounded ${csvLoadProgress.stage === 'parsing' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'}`}>
-                    Processing
-                  </span>
-                  <span className={`px-2 py-1 rounded ${csvLoadProgress.stage === 'rendering' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'}`}>
-                    Rendering
-                  </span>
-                </div>
-              </div>
-            ) : csvData ? (
-              <SimpleDataTable 
-                csvData={csvData} 
-                maxPreviewRows={MAX_PREVIEW_ROWS}
-                filename={uploadedFiles.find(file => file.id === selectedCsvFileId)?.name}
-              />
-            ) : csvLoadProgress.stage === 'error' ? (
-              <div className="space-y-3">
-                <div className="text-red-600 font-medium">
-                  ❌ {csvLoadProgress.message}
-                </div>
-                {csvLoadProgress.error && (
-                  <div className="text-sm text-red-600 bg-red-50 p-3 rounded border">
-                    {csvLoadProgress.error}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => loadCsvData(selectedCsvFileId)}
-                    className="text-xs"
-                  >
-                    <RefreshCw className="w-3 h-3 mr-1" />
-                    Retry Loading
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSelectedCsvFileId("")}
-                    className="text-xs"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : selectedCsvFileId ? (
-              <div className="text-muted-foreground">
-                No data available. Please try selecting the file again.
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                  <FileSpreadsheet className="w-8 h-8 text-gray-400" />
-                </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No CSV file selected
-                </h3>
-                <p className="text-gray-500 mb-4 max-w-sm">
-                  Select a CSV file from the dropdown above to start analyzing your data.
-                </p>
-                <div className="text-sm text-gray-400">
-                  Upload files in the Uploads section to get started.
-                </div>
-              </div>
-            )}
+            <TabbedCsvPreview
+              selectedFileIds={selectedCsvFileIds}
+              uploadedFiles={uploadedFiles.filter(file => file.status === 'completed' && file.name.endsWith('.csv'))}
+              maxPreviewRows={MAX_PREVIEW_ROWS}
+              onFileDataLoad={loadCsvData}
+              csvData={csvData}
+              isLoadingCsv={isLoadingCsv}
+              loadingFiles={loadingFiles}
+              csvLoadProgress={csvLoadProgress}
+            />
           </div>
         )}
 
@@ -1089,8 +1030,8 @@ export default function TalkData() {
         
         <SimpleChatEditor
           onSubmit={handleSubmit}
-          disabled={isLoading || (!selectedConnectionId && !selectedCsvFileId)}
-          placeholder={(!selectedConnectionId && !selectedCsvFileId) ? "Select either a database connection or CSV file first..." : "Ask a question to analyse your data..."}
+          disabled={isLoading || (!selectedConnectionId && selectedCsvFileIds.length === 0)}
+          placeholder={(!selectedConnectionId && selectedCsvFileIds.length === 0) ? "Select either a database connection or CSV file first..." : "Ask a question to analyse your data..."}
           onFileUpload={() => setIsUploadDialogOpen(true)}
           allowFileUploadWhenDisabled={true}
         />
