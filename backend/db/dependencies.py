@@ -63,10 +63,19 @@ def get_db():
             db.rollback()
         except Exception as rollback_error:
             logger.error(f"Error during rollback: {rollback_error}")
-        raise HTTPException(
-            status_code=500, 
-            detail="Internal database error. Please try again."
-        )
+        
+        # Check if this is a generator issue
+        if "generator didn't stop after throw" in str(e):
+            logger.error("Database generator error - this may be caused by LangSmith tracing issues")
+            raise HTTPException(
+                status_code=500, 
+                detail="Database session error. Please try again."
+            )
+        else:
+            raise HTTPException(
+                status_code=500, 
+                detail="Internal database error. Please try again."
+            )
     finally:
         try:
             db.close()

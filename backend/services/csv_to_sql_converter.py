@@ -35,13 +35,14 @@ class CSVToSQLConverter:
         
         logger.info("CSVToSQLConverter initialized successfully")
     
-    async def convert_csv_to_sql(self, file_id: str, csv_data: str) -> str:
+    async def convert_csv_to_sql(self, file_id: str, csv_data: str = None, user_id: str = None) -> str:
         """
-        Convert CSV data to SQLite table.
+        Convert CSV data to SQLite table with Redis caching optimization.
         
         Args:
             file_id: Unique identifier for the file
-            csv_data: CSV content as string
+            csv_data: CSV content as string (optional if user_id provided)
+            user_id: User ID for Redis cache lookup
             
         Returns:
             Table name for SQL queries
@@ -57,6 +58,19 @@ class CSVToSQLConverter:
             if file_id in self.connections:
                 logger.info(f"File {file_id} already converted, returning existing table")
                 return self.table_names[file_id]
+            
+            # Get CSV data from Redis cache if not provided
+            if csv_data is None and user_id:
+                from core.redis_service import redis_service
+                cached_content = redis_service.get_cached_csv_data(user_id, file_id)
+                if cached_content:
+                    logger.info(f"Using cached CSV data for file_id: {file_id}, user: {user_id}")
+                    csv_data = cached_content
+                else:
+                    logger.warning(f"No cached CSV data found for file_id: {file_id}, user: {user_id}")
+            
+            if csv_data is None:
+                raise ValueError("No CSV data provided and no cached data available")
             
             # Validate CSV data size
             csv_size = len(csv_data.encode('utf-8'))
@@ -126,6 +140,9 @@ class CSVToSQLConverter:
             
             # Validate and sanitize SQL query
             sanitized_query = self._sanitize_sql_query(sql_query, table_name)
+            
+            # Fix column name case sensitivity issues
+            sanitized_query = self._fix_column_names_in_sql(sanitized_query, file_id)
             
             # Execute query
             cursor = conn.cursor()
@@ -334,6 +351,77 @@ class CSVToSQLConverter:
         except Exception as e:
             logger.error(f"Error sanitizing SQL query: {e}")
             return sql_query
+    
+    def _fix_column_names_in_sql(self, sql_query: str, file_id: str) -> str:
+        """
+        Fix column name case sensitivity issues in SQL queries.
+        
+        This method performs case-insensitive column name matching to resolve
+        issues where the AI generates SQL with incorrect column name casing.
+        
+        Args:
+            sql_query: The SQL query string
+            file_id: File ID to get the correct column names
+            
+        Returns:
+            SQL query string with corrected column names
+        """
+        try:
+            if file_id not in self.dataframes:
+                return sql_query
+            
+            # Get actual column names from DataFrame
+            df = self.dataframes[file_id]
+            actual_columns = df.columns.tolist()
+            
+            # Create a mapping of lowercase column names to actual column names
+            column_mapping = {}
+            for col in actual_columns:
+                column_mapping[col.lower()] = col
+            
+            # Find and replace column names in the SQL query
+            fixed_query = sql_query
+            
+            # Pattern to match column names in quotes (single or double)
+            import re
+            
+            # Find all quoted strings that might be column names
+            quoted_pattern = r"['\"]([^'\"]+)['\"]"
+            matches = re.findall(quoted_pattern, sql_query)
+            
+            for match in matches:
+                # Check if this quoted string matches a column name (case-insensitive)
+                if match.lower() in column_mapping:
+                    actual_col = column_mapping[match.lower()]
+                    if match != actual_col:
+                        # Replace the incorrect column name with the correct one
+                        fixed_query = fixed_query.replace(f"'{match}'", f"'{actual_col}'")
+                        fixed_query = fixed_query.replace(f'"{match}"', f'"{actual_col}"')
+                        logger.info(f"Fixed SQL column name: '{match}' -> '{actual_col}'")
+            
+            # Also check for unquoted column names in SQL (less common but possible)
+            # Pattern for column names in SELECT, WHERE, GROUP BY, ORDER BY clauses
+            sql_column_pattern = r"\b(SELECT|WHERE|GROUP BY|ORDER BY|HAVING)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b"
+            sql_matches = re.findall(sql_column_pattern, sql_query, re.IGNORECASE)
+            
+            for clause, col_name in sql_matches:
+                if col_name.lower() in column_mapping:
+                    actual_col = column_mapping[col_name.lower()]
+                    if col_name != actual_col:
+                        # Replace in the query
+                        fixed_query = re.sub(
+                            rf"\b{clause}\s+{re.escape(col_name)}\b",
+                            f"{clause} '{actual_col}'",
+                            fixed_query,
+                            flags=re.IGNORECASE
+                        )
+                        logger.info(f"Fixed SQL unquoted column: '{col_name}' -> '{actual_col}'")
+            
+            return fixed_query
+            
+        except Exception as e:
+            logger.warning(f"Error fixing column names in SQL query: {e}")
+            return sql_query  # Return original query if fixing fails
     
     def get_memory_stats(self) -> Dict[str, Any]:
         """

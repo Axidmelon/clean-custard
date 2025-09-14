@@ -51,6 +51,8 @@ class LangSmithService:
         except Exception as e:
             logger.error(f"Failed to initialize LangSmith service: {e}")
             self._initialized = False
+            # Disable tracing if initialization fails
+            settings.langsmith_tracing_enabled = False
     
     @property
     def client(self) -> Optional[Client]:
@@ -103,12 +105,26 @@ class LangSmithService:
             return
         
         try:
-            # Create trace with LangSmith
-            with trace(name, metadata=metadata or {}) as trace_obj:
-                yield trace_obj
+            # Create trace with LangSmith - use inputs instead of metadata
+            with trace(name, inputs=metadata or {}) as trace_obj:
+                # Create a wrapper that provides metadata access
+                class TraceWrapper:
+                    def __init__(self, trace_obj, initial_metadata):
+                        self._trace_obj = trace_obj
+                        self.metadata = initial_metadata or {}
+                    
+                    def __getattr__(self, name):
+                        return getattr(self._trace_obj, name)
+                
+                wrapper = TraceWrapper(trace_obj, metadata)
+                yield wrapper
         except Exception as e:
             logger.error(f"Error creating LangSmith trace '{name}': {e}")
-            # Fallback to dummy trace
+            # Disable tracing for future calls to prevent repeated errors
+            self._initialized = False
+            settings.langsmith_tracing_enabled = False
+            
+            # Fallback to dummy trace - don't let this exception propagate
             class DummyTrace:
                 def __init__(self):
                     self.metadata = metadata or {}
@@ -120,10 +136,7 @@ class LangSmithService:
                     pass
             
             dummy = DummyTrace()
-            try:
-                yield dummy
-            finally:
-                pass
+            yield dummy
     
     def add_metadata(self, trace_obj, metadata: Dict[str, Any]):
         """

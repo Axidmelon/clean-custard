@@ -4,7 +4,8 @@ import json
 import logging
 import os
 import redis
-from typing import Optional, Dict, Any, Union
+import time
+from typing import Optional, Dict, Any, Union, List
 from datetime import datetime, timedelta, timezone
 from core.config import settings
 
@@ -413,6 +414,308 @@ class RedisService:
                 return True
             return False
         except Exception:
+            return False
+    
+    # CSV Data Caching Methods
+    
+    def cache_csv_data(self, user_id: str, file_id: str, csv_content: str, ttl: int = 7200) -> bool:
+        """
+        Cache CSV file content in Redis for processing.
+        
+        Args:
+            user_id: User identifier
+            file_id: File identifier
+            csv_content: Raw CSV content as string
+            ttl: Time to live in seconds (default: 2 hours)
+            
+        Returns:
+            True if cached successfully, False otherwise
+        """
+        if not self.is_available:
+            return False
+        
+        try:
+            self._ensure_connection()
+            key = f"csv_data:{user_id}:{file_id}"
+            
+            # Compress CSV content to save memory
+            import gzip
+            compressed_content = gzip.compress(csv_content.encode('utf-8'))
+            
+            if not self.redis_client:
+                logger.error("Redis client is not available")
+                return False
+                
+            result = self.redis_client.setex(key, ttl, compressed_content)
+            logger.info(f"Cached CSV data for user {user_id}, file {file_id}, size: {len(csv_content)} bytes")
+            return bool(result)
+            
+        except Exception as e:
+            logger.error(f"Failed to cache CSV data for user {user_id}, file {file_id}: {e}")
+            return False
+    
+    def get_cached_csv_data(self, user_id: str, file_id: str) -> Optional[str]:
+        """
+        Retrieve cached CSV data from Redis.
+        
+        Args:
+            user_id: User identifier
+            file_id: File identifier
+            
+        Returns:
+            CSV content as string if found, None otherwise
+        """
+        if not self.is_available:
+            return None
+        
+        try:
+            self._ensure_connection()
+            key = f"csv_data:{user_id}:{file_id}"
+            compressed_data = self.redis_client.get(key)
+            
+            if compressed_data:
+                # Decompress the data
+                import gzip
+                csv_content = gzip.decompress(compressed_data).decode('utf-8')
+                logger.debug(f"Retrieved cached CSV data for user {user_id}, file {file_id}")
+                return csv_content
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve cached CSV data for user {user_id}, file {file_id}: {e}")
+            return None
+    
+    def invalidate_csv_cache(self, user_id: str, file_id: str) -> bool:
+        """
+        Invalidate cached CSV data.
+        
+        Args:
+            user_id: User identifier
+            file_id: File identifier
+            
+        Returns:
+            True if invalidated successfully, False otherwise
+        """
+        if not self.is_available:
+            return False
+        
+        try:
+            self._ensure_connection()
+            key = f"csv_data:{user_id}:{file_id}"
+            result = self.redis_client.delete(key)
+            logger.info(f"Invalidated CSV cache for user {user_id}, file {file_id}")
+            return bool(result)
+            
+        except Exception as e:
+            logger.error(f"Failed to invalidate CSV cache for user {user_id}, file {file_id}: {e}")
+            return False
+    
+    def get_csv_cache_stats(self) -> Dict[str, Any]:
+        """
+        Get CSV cache statistics.
+        
+        Returns:
+            Dictionary with CSV cache statistics
+        """
+        if not self.is_available:
+            return {"status": "unavailable", "error": "Redis not connected"}
+        
+        try:
+            self._ensure_connection()
+            
+            # Count CSV cache keys
+            csv_keys = self.redis_client.keys("csv_data:*")
+            total_csv_files = len(csv_keys)
+            
+            # Calculate total memory usage for CSV data
+            total_size = 0
+            for key in csv_keys:
+                try:
+                    size = self.redis_client.memory_usage(key)
+                    total_size += size
+                except Exception:
+                    continue
+            
+            return {
+                "status": "available",
+                "total_csv_files": total_csv_files,
+                "total_memory_bytes": total_size,
+                "total_memory_mb": round(total_size / (1024 * 1024), 2)
+            }
+            
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+    
+    # Proactive Cache Refresh Methods
+    
+    def track_user_activity(self, user_id: str, file_id: str) -> bool:
+        """
+        Track user activity for proactive cache refresh.
+        
+        Args:
+            user_id: User identifier
+            file_id: File identifier
+            
+        Returns:
+            True if tracked successfully, False otherwise
+        """
+        if not self.is_available:
+            return False
+        
+        try:
+            self._ensure_connection()
+            
+            if not self.redis_client:
+                logger.error("Redis client is not available")
+                return False
+            
+            activity_key = f"user_activity:{user_id}:{file_id}"
+            current_time = int(time.time())
+            
+            # Store activity timestamp (expires in 1 hour)
+            result = self.redis_client.setex(activity_key, 3600, current_time)
+            return bool(result)
+            
+        except Exception as e:
+            logger.error(f"Failed to track user activity for user {user_id}, file {file_id}: {e}")
+            return False
+    
+    def get_user_activity(self, user_id: str, file_id: str) -> Optional[int]:
+        """
+        Get user's last activity timestamp.
+        
+        Args:
+            user_id: User identifier
+            file_id: File identifier
+            
+        Returns:
+            Unix timestamp of last activity, or None if not found
+        """
+        if not self.is_available:
+            return None
+        
+        try:
+            self._ensure_connection()
+            
+            if not self.redis_client:
+                logger.error("Redis client is not available")
+                return None
+            
+            activity_key = f"user_activity:{user_id}:{file_id}"
+            activity_time = self.redis_client.get(activity_key)
+            
+            if activity_time:
+                return int(activity_time)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to get user activity for user {user_id}, file {file_id}: {e}")
+            return None
+    
+    def get_expiring_caches(self, minutes_before_expiry: int = 5) -> List[Dict[str, Any]]:
+        """
+        Get CSV caches that are expiring soon and need proactive refresh.
+        
+        Args:
+            minutes_before_expiry: How many minutes before expiry to consider
+            
+        Returns:
+            List of cache information for expiring caches
+        """
+        if not self.is_available:
+            return []
+        
+        try:
+            self._ensure_connection()
+            
+            if not self.redis_client:
+                logger.error("Redis client is not available")
+                return []
+            
+            import time
+            
+            expiring_caches = []
+            csv_keys = self.redis_client.keys("csv_data:*")
+            current_time = int(time.time())
+            expiry_threshold = minutes_before_expiry * 60  # Convert to seconds
+            
+            for key in csv_keys:
+                try:
+                    # Get TTL for this key
+                    ttl = self.redis_client.ttl(key)
+                    
+                    # TTL returns -1 if key exists but has no expiry, -2 if key doesn't exist
+                    # We only want keys with positive TTL (expiring keys)
+                    if isinstance(ttl, int) and ttl > 0 and ttl <= expiry_threshold:
+                        # Parse key to extract user_id and file_id
+                        key_parts = key.split(":")
+                        if len(key_parts) >= 3:
+                            user_id = key_parts[1]
+                            file_id = key_parts[2]
+                            
+                            # Check if user has recent activity (within last 30 minutes)
+                            activity_time = self.get_user_activity(user_id, file_id)
+                            if activity_time and (current_time - activity_time) <= 1800:  # 30 minutes
+                                expiring_caches.append({
+                                    "key": key,
+                                    "user_id": user_id,
+                                    "file_id": file_id,
+                                    "ttl": ttl,
+                                    "expires_in_minutes": ttl // 60,
+                                    "last_activity_minutes_ago": (current_time - activity_time) // 60
+                                })
+                                
+                except Exception as e:
+                    logger.warning(f"Error processing cache key {key}: {e}")
+                    continue
+            
+            return expiring_caches
+            
+        except Exception as e:
+            logger.error(f"Failed to get expiring caches: {e}")
+            return []
+    
+    def refresh_expiring_cache(self, user_id: str, file_id: str) -> bool:
+        """
+        Proactively refresh an expiring cache by extending its TTL.
+        
+        Args:
+            user_id: User identifier
+            file_id: File identifier
+            
+        Returns:
+            True if refreshed successfully, False otherwise
+        """
+        if not self.is_available:
+            return False
+        
+        try:
+            self._ensure_connection()
+            
+            if not self.redis_client:
+                logger.error("Redis client is not available")
+                return False
+            
+            key = f"csv_data:{user_id}:{file_id}"
+            
+            # Check if cache exists
+            if not self.redis_client.exists(key):
+                logger.warning(f"Cache key {key} does not exist for refresh")
+                return False
+            
+            # Extend TTL by 2 hours (7200 seconds)
+            result = self.redis_client.expire(key, 7200)
+            
+            if result:
+                logger.info(f"Successfully refreshed cache for user {user_id}, file {file_id}")
+                return True
+            else:
+                logger.warning(f"Failed to refresh cache for user {user_id}, file {file_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to refresh cache for user {user_id}, file {file_id}: {e}")
             return False
 
 

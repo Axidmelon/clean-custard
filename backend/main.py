@@ -127,6 +127,18 @@ async def startup_validation():
         logger.info("✓ Production readiness validated")
 
     logger.info("✓ All startup validations passed")
+    
+    # Start background cache refresh service
+    try:
+        from services.cache_refresh_service import cache_refresh_service
+        import asyncio
+        
+        # Start the background service in a separate task
+        asyncio.create_task(cache_refresh_service.start_background_refresh())
+        logger.info("✓ Background cache refresh service started")
+    except Exception as e:
+        logger.error(f"Failed to start background cache refresh service: {e}")
+        # Don't fail startup if cache refresh service fails
 
 
 async def graceful_shutdown():
@@ -153,6 +165,14 @@ async def graceful_shutdown():
     except Exception as e:
         logger.error(f"Error closing database connections: {e}")
 
+    # Stop background cache refresh service
+    try:
+        from services.cache_refresh_service import cache_refresh_service
+        cache_refresh_service.stop_background_refresh()
+        logger.info("✓ Background cache refresh service stopped")
+    except Exception as e:
+        logger.error(f"Error stopping background cache refresh service: {e}")
+    
     logger.info("✓ Graceful shutdown completed")
 
 

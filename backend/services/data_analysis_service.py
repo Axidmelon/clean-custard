@@ -91,7 +91,7 @@ PANDAS CODE:
         self.query_prompt = ChatPromptTemplate.from_template(prompt_template)
         self.query_chain = self.query_prompt | self.llm
     
-    async def analyze_data_schema(self, file_id: str) -> Dict[str, Any]:
+    async def analyze_data_schema(self, file_id: str, user_id: str = None) -> Dict[str, Any]:
         """
         Analyze CSV file and return detailed schema information.
         
@@ -127,13 +127,14 @@ PANDAS CODE:
             logger.error(f"Error analyzing CSV schema for file_id {file_id}: {e}")
             raise
     
-    async def process_query(self, question: str, file_id: str) -> Dict[str, Any]:
+    async def process_query(self, question: str, file_id: str, user_id: str = None) -> Dict[str, Any]:
         """
         Process a natural language question on CSV data.
         
         Args:
             question: Natural language question
             file_id: ID of the CSV file
+            user_id: User ID for Redis cache lookup
             
         Returns:
             Dictionary containing query results and metadata
@@ -141,13 +142,13 @@ PANDAS CODE:
         try:
             logger.info(f"Processing query: '{question}' for file_id: {file_id}")
             
-            # Get CSV data
-            df = await self._get_csv_data(file_id)
+            # Get CSV data with Redis caching
+            df = await self._get_csv_data(file_id, user_id)
             if df is None:
                 raise ValueError(f"Could not load CSV data for file_id: {file_id}")
             
-            # Get schema information
-            schema_info = await self.analyze_data_schema(file_id)
+            # Get schema information with Redis caching
+            schema_info = await self.analyze_data_schema(file_id, user_id)
             
             # Generate pandas query
             pandas_query = await self._generate_pandas_query(question, schema_info)
@@ -165,25 +166,36 @@ PANDAS CODE:
             logger.error(f"Error processing query for file_id {file_id}: {e}")
             raise
     
-    async def _get_csv_data(self, file_id: str) -> Optional[pd.DataFrame]:
+    async def _get_csv_data(self, file_id: str, user_id: str = None) -> Optional[pd.DataFrame]:
         """
-        Get CSV data from file upload service.
+        Get CSV data with Redis caching optimization.
         
         Args:
             file_id: ID of the uploaded file
+            user_id: User ID for Redis cache lookup
             
         Returns:
             pandas DataFrame or None if error
         """
         try:
-            # Check if data is already cached
+            # 1. Check Redis cache first (new optimization)
+            if user_id:
+                from core.redis_service import redis_service
+                cached_content = redis_service.get_cached_csv_data(user_id, file_id)
+                if cached_content:
+                    logger.info(f"CSV data found in Redis cache for file_id: {file_id}, user: {user_id}")
+                    df = pd.read_csv(StringIO(cached_content))
+                    # Also cache in service cache for this session
+                    self.csv_cache[file_id] = df
+                    return df
+            
+            # 2. Check service's own cache
             if file_id in self.csv_cache:
-                logger.debug(f"CSV data found in cache for file_id: {file_id}")
+                logger.debug(f"CSV data found in service cache for file_id: {file_id}")
                 return self.csv_cache[file_id]
             
-            # Get file content from backend API
-            # This would typically call your file upload service
-            # For now, we'll implement a placeholder
+            # 3. Fallback to fetching from Cloudinary
+            logger.info(f"Fetching CSV data from Cloudinary for file_id: {file_id}")
             content = await self._fetch_file_content(file_id)
             
             if content is None:
@@ -203,8 +215,14 @@ PANDAS CODE:
                 logger.warning(f"CSV file is empty for file_id: {file_id}")
                 raise ValueError("CSV file appears to be empty or contains no valid data.")
             
-            # Cache the data
+            # Cache the data in both caches
             self.csv_cache[file_id] = df
+            
+            # Cache in Redis if user_id is available
+            if user_id:
+                from core.redis_service import redis_service
+                redis_service.cache_csv_data(user_id, file_id, content, ttl=7200)  # 2 hours
+                logger.info(f"Cached CSV data in Redis for file_id: {file_id}, user: {user_id}")
             
             logger.info(f"CSV data loaded successfully for file_id: {file_id}, shape: {df.shape}")
             return df
@@ -457,6 +475,78 @@ PANDAS CODE:
             logger.error(f"Error formatting schema for prompt: {e}")
             return "Schema information unavailable"
     
+    def _fix_column_names_in_query(self, pandas_query: str, df: pd.DataFrame) -> str:
+        """
+        Fix column name case sensitivity issues in pandas queries.
+        
+        This method performs case-insensitive column name matching to resolve
+        issues where the AI generates queries with incorrect column name casing.
+        
+        Args:
+            pandas_query: The pandas query string
+            df: DataFrame with actual column names
+            
+        Returns:
+            Query string with corrected column names
+        """
+        try:
+            # Get actual column names from DataFrame
+            actual_columns = df.columns.tolist()
+            
+            # Create a mapping of lowercase column names to actual column names
+            column_mapping = {}
+            for col in actual_columns:
+                column_mapping[col.lower()] = col
+            
+            # Find and replace column names in the query
+            fixed_query = pandas_query
+            
+            # Pattern to match column names in quotes (single or double)
+            import re
+            
+            # Find all quoted strings that might be column names
+            quoted_pattern = r"['\"]([^'\"]+)['\"]"
+            matches = re.findall(quoted_pattern, pandas_query)
+            
+            for match in matches:
+                # Check if this quoted string matches a column name (case-insensitive)
+                if match.lower() in column_mapping:
+                    actual_col = column_mapping[match.lower()]
+                    if match != actual_col:
+                        # Replace the incorrect column name with the correct one
+                        fixed_query = fixed_query.replace(f"'{match}'", f"'{actual_col}'")
+                        fixed_query = fixed_query.replace(f'"{match}"', f'"{actual_col}"')
+                        logger.info(f"Fixed column name: '{match}' -> '{actual_col}'")
+            
+            # Also check for unquoted column names in common pandas operations
+            # Pattern for df['column'] or df["column"] or df.column
+            df_column_pattern = r"df\[['\"]([^'\"]+)['\"]\]|df\.([a-zA-Z_][a-zA-Z0-9_]*)"
+            df_matches = re.findall(df_column_pattern, pandas_query)
+            
+            for match in df_matches:
+                col_name = match[0] if match[0] else match[1]  # Get the column name
+                if col_name.lower() in column_mapping:
+                    actual_col = column_mapping[col_name.lower()]
+                    if col_name != actual_col:
+                        # Replace in the query
+                        fixed_query = re.sub(
+                            rf"df\[['\"]{re.escape(col_name)}['\"]\]",
+                            f"df['{actual_col}']",
+                            fixed_query
+                        )
+                        fixed_query = re.sub(
+                            rf"df\.{re.escape(col_name)}\b",
+                            f"df['{actual_col}']",
+                            fixed_query
+                        )
+                        logger.info(f"Fixed df column reference: '{col_name}' -> '{actual_col}'")
+            
+            return fixed_query
+            
+        except Exception as e:
+            logger.warning(f"Error fixing column names in query: {e}")
+            return pandas_query  # Return original query if fixing fails
+    
     def _execute_pandas_query(self, pandas_query: str, df: pd.DataFrame) -> Any:
         """
         Execute pandas query safely, handling both expressions and statements.
@@ -469,6 +559,9 @@ PANDAS CODE:
             Query result
         """
         try:
+            # Pre-process the query to fix column name case sensitivity issues
+            pandas_query = self._fix_column_names_in_query(pandas_query, df)
+            
             # Create a safe execution environment
             safe_globals = {
                 'df': df,

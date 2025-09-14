@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from typing import List
 import logging
 import httpx
+from datetime import datetime
 from db.dependencies import get_db
 from db.models import User, UploadedFile
 from services.cloudinary_upload_service import cloudinary_upload_service
@@ -610,6 +611,179 @@ async def validate_file_exists(
             "file_id": file_id,
             "message": f"Error validating file: {str(e)}"
         }
+
+@router.post("/cache-csv/{file_id}")
+async def cache_csv_file(
+    file_id: str,
+    current_user: User = Depends(get_current_user()),
+    db: Session = Depends(get_db)
+):
+    """
+    Cache CSV file content in Redis for faster processing
+    """
+    try:
+        logger.info(f"Caching CSV file for file_id: {file_id}, user: {current_user.id}")
+        
+        # Find the file in database
+        uploaded_file = db.query(UploadedFile).filter(
+            UploadedFile.id == file_id,
+            UploadedFile.user_id == current_user.id
+        ).first()
+        
+        if not uploaded_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found"
+            )
+        
+        # Check if file is already cached
+        from core.redis_service import redis_service
+        cached_data = redis_service.get_cached_csv_data(str(current_user.id), file_id)
+        
+        if cached_data:
+            logger.info(f"CSV file {file_id} already cached for user {current_user.id}")
+            return {
+                "success": True,
+                "message": "File already cached",
+                "cached": True,
+                "file_info": {
+                    "filename": uploaded_file.original_filename,
+                    "size": len(cached_data),
+                    "cached_at": "Already cached"
+                }
+            }
+        
+        # Generate signed URL for downloading
+        if not uploaded_file.cloudinary_public_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File does not have a valid Cloudinary public ID"
+            )
+        
+        # Generate short-lived signed URL (10 minutes)
+        signed_url_data = cloudinary_upload_service.generate_signed_url(
+            uploaded_file.cloudinary_public_id, 
+            0.167,  # 10 minutes
+            str(current_user.id)
+        )
+        
+        # Download CSV content
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(signed_url_data["signed_url"])
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to download file content"
+                )
+            
+            csv_content = response.text
+        
+        # Cache the CSV content in Redis (2 hours)
+        cache_success = redis_service.cache_csv_data(
+            str(current_user.id), 
+            file_id, 
+            csv_content, 
+            ttl=7200  # 2 hours
+        )
+        
+        if not cache_success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to cache file content"
+            )
+        
+        logger.info(f"Successfully cached CSV file {file_id} for user {current_user.id}")
+        
+        return {
+            "success": True,
+            "message": "File cached successfully",
+            "cached": True,
+            "file_info": {
+                "filename": uploaded_file.original_filename,
+                "size": len(csv_content),
+                "cached_at": datetime.now().isoformat(),
+                "expires_in_hours": 2
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error caching CSV file: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while caching file"
+        )
+
+@router.post("/refresh-cache/{file_id}")
+async def refresh_csv_cache(
+    file_id: str,
+    current_user: User = Depends(get_current_user()),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually refresh CSV cache for a specific file
+    """
+    try:
+        logger.info(f"Manual cache refresh requested for file_id: {file_id}, user: {current_user.id}")
+        
+        from services.cache_refresh_service import cache_refresh_service
+        
+        # Attempt manual refresh
+        success = await cache_refresh_service.manual_refresh_cache(str(current_user.id), file_id)
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Cache refreshed successfully",
+                "file_id": file_id,
+                "refreshed_at": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Cache refresh failed or user not active recently",
+                "file_id": file_id
+            }
+        
+    except Exception as e:
+        logger.error(f"Unexpected error refreshing cache: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while refreshing cache"
+        )
+
+@router.get("/cache-status")
+async def get_cache_status(
+    current_user: User = Depends(get_current_user())
+):
+    """
+    Get CSV cache status and statistics
+    """
+    try:
+        from core.redis_service import redis_service
+        from services.cache_refresh_service import cache_refresh_service
+        
+        # Get Redis cache stats
+        cache_stats = redis_service.get_csv_cache_stats()
+        
+        # Get refresh service status
+        service_status = cache_refresh_service.get_service_status()
+        
+        return {
+            "success": True,
+            "cache_stats": cache_stats,
+            "refresh_service": service_status,
+            "user_id": str(current_user.id)
+        }
+        
+    except Exception as e:
+        logger.error(f"Unexpected error getting cache status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while getting cache status"
+        )
 
 @router.get("/content/{file_id}")
 async def get_file_content(

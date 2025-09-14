@@ -165,7 +165,8 @@ RULES:
 - You MUST only respond with the SQL query itself. Do not add any extra text,
   explanations, or markdown formatting like ```sql. Just the query.
 - Always use the table and column names exactly as they are provided in the schema.
-- If a question is not related to the database, inform the user that the question is not related to the database.
+- If a question cannot be answered with the available data, write a simple SELECT query that returns no results.
+- NEVER respond with explanatory text - always return valid SQL syntax.
 
 Here is the database schema:
 {schema}
@@ -358,3 +359,7 @@ Response:"""
                 logger.error(f"Error in natural response generation: {e}")
                 langsmith_service.log_trace_event("natural_response_error", f"Failed to generate natural response: {str(e)}")
                 raise
+
+
+# Global instance
+text_to_sql_service = TextToSQLService()

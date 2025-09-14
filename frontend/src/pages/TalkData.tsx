@@ -9,6 +9,7 @@ import { queryService } from "@/services/queryService";
 import { QueryResponse } from "@/types/api";
 import { useFileUpload } from "@/contexts/FileUploadContext";
 import { signedUrlService } from "@/services/signedUrlService";
+import { csvCacheService } from "@/services/csvCacheService";
 import { SimpleChatEditor } from "@/components/blocknote/SimpleChatEditor";
 import { SimpleDataTable } from "@/components/blocknote/SimpleDataTable";
 import { RichTextDisplay } from "@/components/ui/RichTextDisplay";
@@ -78,6 +79,17 @@ export default function TalkData() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  const cacheCsvFileForProcessing = async (fileId: string) => {
+    try {
+      console.log('🔄 Caching CSV file for processing:', fileId);
+      await csvCacheService.ensureCsvCached(fileId);
+      console.log('✅ CSV file cached successfully for processing');
+    } catch (error) {
+      console.warn('⚠️ Failed to cache CSV file for processing:', error);
+      // Don't throw error - this is optimization, not critical
+    }
+  };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
@@ -86,6 +98,8 @@ export default function TalkData() {
   useEffect(() => {
     if (selectedCsvFileId) {
       loadCsvData(selectedCsvFileId);
+      // Cache the CSV file for processing
+      cacheCsvFileForProcessing(selectedCsvFileId);
     } else {
       setCsvData(null);
     }
@@ -292,8 +306,8 @@ export default function TalkData() {
         
         try {
           const urlStartTime = performance.now();
-          // Get signed URL from backend (30 minutes expiration for enhanced security)
-          const signedUrlResponse = await signedUrlService.getSignedUrl(fileId, 0.5);
+          // Get signed URL from backend (10 minutes expiration for enhanced security)
+          const signedUrlResponse = await signedUrlService.getSignedUrl(fileId, 0.167); // 10 minutes = 0.167 hours
           const urlEndTime = performance.now();
           
           console.log('🔑 Got signed URL:', {

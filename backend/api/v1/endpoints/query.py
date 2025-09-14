@@ -5,11 +5,12 @@ from typing import Optional
 import logging
 
 from db.dependencies import get_db
-from db.models import Connection
+from db.models import Connection, User
 from llm.services import TextToSQLService
 from ws.connection_manager import manager, ConnectionManager
 from schemas.connection import Connection as ConnectionSchema  # Import your Pydantic schema
 from core.langsmith_service import langsmith_service
+from core.jwt_handler import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -51,7 +52,11 @@ def format_agent_result(result: list) -> str:
 
 # --- The Main API Endpoint ---
 @router.post("/query", response_model=QueryResponse)
-async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(get_db)):
+async def ask_question(
+    request: QueryRequest = Body(...), 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user())
+):
     """
     This endpoint orchestrates the entire "question-to-answer" flow.
     Automatic intelligent routing:
@@ -74,7 +79,7 @@ async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(
             
             # Automatic AI routing: If CSV file is provided, AI agent decides the best service
             if request.file_id:
-                result = await handle_ai_routing(request, db)
+                result = await handle_ai_routing(request, db, current_user)
             else:
                 # No CSV file: Go directly to database analysis (no AI routing)
                 result = await handle_database_query(request, db)
@@ -105,7 +110,7 @@ async def ask_question(request: QueryRequest = Body(...), db: Session = Depends(
             langsmith_service.log_trace_event("query_endpoint_error", f"Failed to process query: {str(e)}")
             raise
 
-async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse:
+async def handle_ai_routing(request: QueryRequest, db: Session, current_user) -> QueryResponse:
     """
     Handle automatic AI-powered intelligent routing using the AI routing agent.
     This is automatically triggered when a CSV file is provided.
@@ -153,22 +158,22 @@ async def handle_ai_routing(request: QueryRequest, db: Session) -> QueryResponse
         # Route to the AI-recommended service (only CSV services)
         if recommended_service == "data_analysis_service":
             logger.info("🤖 AI routing to data analysis service (pandas)")
-            return await handle_data_analysis_query(request, db)
+            return await handle_data_analysis_query(request, db, current_user)
         elif recommended_service == "csv_to_sql_converter":
             logger.info("🤖 AI routing to CSV to SQL converter")
-            return await handle_csv_sql_query(request, db)
+            return await handle_csv_sql_query(request, db, current_user)
         else:
             # Fallback to CSV to SQL converter for unknown recommendations
             logger.warning(f"🤖 Unknown AI recommendation: {recommended_service}, falling back to CSV to SQL converter")
-            return await handle_csv_sql_query(request, db)
+            return await handle_csv_sql_query(request, db, current_user)
             
     except Exception as e:
         logger.error(f"🤖 Error in AI routing: {e}")
         # Fallback to CSV to SQL converter on error
         logger.info("🤖 Falling back to CSV to SQL converter due to AI routing error")
-        return await handle_csv_sql_query(request, db)
+        return await handle_csv_sql_query(request, db, current_user)
 
-async def handle_data_analysis_query(request: QueryRequest, db: Session) -> QueryResponse:
+async def handle_data_analysis_query(request: QueryRequest, db: Session, current_user) -> QueryResponse:
     """
     Handle data analysis queries using the data analysis service with file validation.
     """
@@ -206,8 +211,12 @@ async def handle_data_analysis_query(request: QueryRequest, db: Session) -> Quer
                 detail="File URL is not available. Please re-upload the file."
             )
         
-        # Process data analysis query
-        result = await data_analysis_service.process_query(request.question, request.file_id)
+        # Track user activity for proactive cache refresh
+        from core.redis_service import redis_service
+        redis_service.track_user_activity(str(current_user.id), request.file_id)
+        
+        # Process data analysis query with Redis caching
+        result = await data_analysis_service.process_query(request.question, request.file_id, str(current_user.id))
         
         # Convert to QueryResponse format
         return QueryResponse(
@@ -225,13 +234,13 @@ async def handle_data_analysis_query(request: QueryRequest, db: Session) -> Quer
         logger.error(f"Unexpected error processing data analysis query for file_id {request.file_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process data analysis query: {str(e)}")
 
-async def handle_csv_sql_query(request: QueryRequest, db: Session) -> QueryResponse:
+async def handle_csv_sql_query(request: QueryRequest, db: Session, current_user) -> QueryResponse:
     """
     Handle SQL queries on CSV data using in-memory SQLite.
     """
     from services.csv_to_sql_converter import csv_to_sql_converter
     from services.data_analysis_service import data_analysis_service
-    from llm.services import TextToSQLService
+    from llm.services import text_to_sql_service
     from db.models import UploadedFile
     import logging
     
@@ -265,13 +274,17 @@ async def handle_csv_sql_query(request: QueryRequest, db: Session) -> QueryRespo
                 detail="File URL is not available. Please re-upload the file."
             )
         
-        # Get CSV data using existing DataAnalysisService
-        df = await data_analysis_service._get_csv_data(request.file_id)
+        # Track user activity for proactive cache refresh
+        from core.redis_service import redis_service
+        redis_service.track_user_activity(str(current_user.id), request.file_id)
+        
+        # Get CSV data using existing DataAnalysisService with Redis caching
+        df = await data_analysis_service._get_csv_data(request.file_id, str(current_user.id))
         if df is None:
             raise HTTPException(status_code=404, detail="CSV file not found or could not be loaded")
         
-        # Convert CSV to SQLite table
-        table_name = await csv_to_sql_converter.convert_csv_to_sql(request.file_id, df.to_csv())
+        # Convert CSV to SQLite table with Redis caching
+        table_name = await csv_to_sql_converter.convert_csv_to_sql(request.file_id, df.to_csv(), str(current_user.id))
         
         # Get schema information for SQL generation
         schema_info = await csv_to_sql_converter.get_table_schema(request.file_id)
@@ -288,8 +301,7 @@ async def handle_csv_sql_query(request: QueryRequest, db: Session) -> QueryRespo
             for i, row in enumerate(schema_info["sample_data"][:3]):  # First 3 rows
                 schema_string += f"Row {i+1}: {row}\n"
         
-        text_to_sql = TextToSQLService()
-        sql_query = text_to_sql.generate_sql(request.question, schema_string)
+        sql_query = text_to_sql_service.generate_sql(request.question, schema_string)
         
         # Execute SQL on CSV data
         result = await csv_to_sql_converter.execute_sql_query(request.file_id, sql_query)
@@ -298,7 +310,7 @@ async def handle_csv_sql_query(request: QueryRequest, db: Session) -> QueryRespo
             raise HTTPException(status_code=400, detail=result["error"])
         
         # Generate natural language response using TextToSQLService
-        answer = text_to_sql.generate_natural_response(request.question, sql_query, result["data"])
+        answer = text_to_sql_service.generate_natural_response(request.question, sql_query, result["data"])
         
         return QueryResponse(
             answer=answer,
@@ -348,8 +360,8 @@ async def handle_database_query(request: QueryRequest, db: Session) -> QueryResp
 
     # 2. Use the LLM service to generate the SQL query
     try:
-        sql_service = TextToSQLService()
-        generated_sql = sql_service.generate_sql(
+        from llm.services import text_to_sql_service
+        generated_sql = text_to_sql_service.generate_sql(
             question=request.question,
             schema=str(db_connection.db_schema_cache),  # Convert schema to string
         )
@@ -389,7 +401,7 @@ async def handle_database_query(request: QueryRequest, db: Session) -> QueryResp
     
     # 5. Generate natural language response using TextToSQLService
     try:
-        final_answer = sql_service.generate_natural_response(request.question, generated_sql, raw_data)
+        final_answer = text_to_sql_service.generate_natural_response(request.question, generated_sql, raw_data)
     except Exception as e:
         logger.warning(f"Failed to generate natural response: {e}")
         # Fallback to simple response
