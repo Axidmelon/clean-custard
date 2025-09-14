@@ -156,7 +156,8 @@ async def handle_ai_routing(request: QueryRequest, db: Session, current_user) ->
             question=request.question,
             file_size=file_size,
             data_source="csv",
-            user_preference=request.user_preference
+            user_preference=request.user_preference,
+            user_id=str(current_user.id)  # Add user_id for cached CSV access
         )
         
         # Use intelligent multi-file routing - AI will select which files to use

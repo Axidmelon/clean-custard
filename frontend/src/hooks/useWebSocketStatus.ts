@@ -80,7 +80,7 @@ class WebSocketStatusManagerImpl implements WebSocketStatusManager {
     return `${wsUrl}/status/ws`;
   }
 
-  private handleMessage(data: any) {
+  private handleMessage(data: { type: string; agent_id: string; agentConnected: boolean }) {
     if (data.type === 'AGENT_STATUS_UPDATE') {
       const { agent_id, agentConnected } = data;
       logDebug(`WebSocket status update received: agent_id=${agent_id}, agentConnected=${agentConnected}`);

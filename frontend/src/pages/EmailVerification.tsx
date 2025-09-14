@@ -66,7 +66,7 @@ export default function EmailVerification() {
     };
 
     verifyEmail();
-  }, [searchParams.get('token')]); // Only depend on the token, not the entire searchParams object
+  }, [searchParams.get('token'), login, navigate]); // Include stable dependencies
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 flex items-center justify-center p-4">

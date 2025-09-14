@@ -48,6 +48,25 @@ class CsvCacheService {
       return false;
     }
   }
+
+  async cacheCsvFromData(fileId: string, csvData: string): Promise<CsvCacheResponse> {
+    console.log('Caching CSV data from frontend:', fileId, `(${(csvData.length / 1024).toFixed(1)} KB)`);
+    
+    const response = await fetch(`${getApiBaseUrl()}/files/cache-csv-from-data/${fileId}`, {
+      method: 'POST',
+      headers: await this.getAuthHeaders(),
+      body: JSON.stringify({ csv_data: csvData }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Failed to cache CSV data' }));
+      throw new Error(errorData.detail || 'Failed to cache CSV data');
+    }
+
+    const data: CsvCacheResponse = await response.json();
+    console.log('CSV data cached successfully from frontend:', data);
+    return data;
+  }
 }
 
 export const csvCacheService = new CsvCacheService();

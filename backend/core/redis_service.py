@@ -8,8 +8,36 @@ import time
 from typing import Optional, Dict, Any, Union, List
 from datetime import datetime, timedelta, timezone
 from core.config import settings
+from functools import wraps
 
 logger = logging.getLogger(__name__)
+
+
+def redis_retry(max_retries=3, delay=0.1):
+    """
+    Decorator to retry Redis operations with exponential backoff.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (redis.ConnectionError, redis.TimeoutError, redis.RedisError) as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        wait_time = delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"Redis operation failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Redis operation failed after {max_retries} attempts: {e}")
+            
+            # If all retries failed, raise the last exception
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 class RedisService:
@@ -36,52 +64,56 @@ class RedisService:
             # Use Redis URL from environment or default to localhost
             redis_url = os.getenv('REDIS_URL') or getattr(settings, 'redis_url', 'redis://localhost:6379/0')
             
-            # Parse Redis URL for connection parameters
-            if redis_url.startswith('redis://'):
-                # Extract host, port, db from URL
-                url_parts = redis_url.replace('redis://', '').split('/')
-                host_port = url_parts[0].split(':')
-                host = host_port[0] if host_port[0] else 'localhost'
-                port = int(host_port[1]) if len(host_port) > 1 else 6379
-                db = int(url_parts[1]) if len(url_parts) > 1 else 0
-            else:
-                host, port, db = 'localhost', 6379, 0
-            
-            # Create Redis connection with timeout settings (for text data)
-            self.redis_client = redis.Redis(
-                host=host,
-                port=port,
-                db=db,
+            # Use redis.from_url() for proper URL parsing (handles auth, cloud URLs, etc.)
+            self.redis_client = redis.from_url(
+                redis_url,
                 decode_responses=True,
-                socket_timeout=5,
-                socket_connect_timeout=5,
-                retry_on_timeout=True,
-                health_check_interval=30
+                socket_timeout=5.0,  # Increased timeout for stability
+                socket_connect_timeout=3.0,  # Increased connection timeout
+                retry_on_timeout=True,  # Enable retry on timeout for reliability
+                health_check_interval=30,  # More frequent health checks
+                max_connections=20,  # Reasonable connection pool size
+                socket_keepalive=True  # Keep connections alive
             )
             
             # Create separate Redis client for binary data (CSV caching)
-            self.redis_binary_client = redis.Redis(
-                host=host,
-                port=port,
-                db=db,
+            self.redis_binary_client = redis.from_url(
+                redis_url,
                 decode_responses=False,  # Keep binary data as bytes
-                socket_timeout=5,
-                socket_connect_timeout=5,
-                retry_on_timeout=True,
-                health_check_interval=30
+                socket_timeout=10.0,  # Longer timeout for binary data operations
+                socket_connect_timeout=3.0,  # Increased connection timeout
+                retry_on_timeout=True,  # Enable retry on timeout for reliability
+                health_check_interval=30,  # More frequent health checks
+                max_connections=20,  # Reasonable connection pool size
+                socket_keepalive=True  # Keep connections alive
             )
             
-            # Test connection
+            # Test connection with timeout
             self.redis_client.ping()
             self.redis_binary_client.ping()
             self.is_available = True
-            logger.info(f"Redis connected successfully to {host}:{port}/{db} (text + binary clients)")
+            
+            # Warm up connection pool
+            self._warmup_connections()
+            
+            logger.info(f"🚀 Redis connected successfully using URL: {redis_url} (ultra-fast config)")
             
         except Exception as e:
             logger.warning(f"Redis connection failed: {e}. Falling back to database-only mode.")
             self.is_available = False
             self.redis_client = None
             self.redis_binary_client = None
+    
+    def _warmup_connections(self):
+        """Warm up Redis connection pool for faster operations."""
+        try:
+            # Pre-create connections in the pool
+            for _ in range(5):
+                self.redis_client.ping()
+                self.redis_binary_client.ping()
+            logger.info("🔥 Redis connection pool warmed up")
+        except Exception as e:
+            logger.warning(f"Redis warmup failed: {e}")
     
     def _ensure_connection(self):
         """Ensure Redis connection is active, reconnect if needed."""
@@ -434,6 +466,7 @@ class RedisService:
     
     # CSV Data Caching Methods
     
+    @redis_retry(max_retries=3, delay=0.2)
     def cache_csv_data(self, user_id: str, file_id: str, csv_content: str, ttl: int = 7200) -> bool:
         """
         Cache CSV file content in Redis for processing.
@@ -459,6 +492,11 @@ class RedisService:
                 logger.error(f"Invalid CSV content for user {user_id}, file {file_id}")
                 return False
             
+            # Check Redis availability before attempting operation
+            if not self.is_available or not self.redis_binary_client:
+                logger.warning(f"Redis not available for caching CSV data for user {user_id}, file {file_id}")
+                return False
+            
             # Compress CSV content to save memory
             import gzip
             try:
@@ -468,24 +506,31 @@ class RedisService:
                 logger.error(f"Failed to compress CSV data for user {user_id}, file {file_id}: {compress_error}")
                 return False
             
-            if not self.redis_binary_client:
-                logger.error("Redis binary client is not available")
+            # Store compressed binary data using binary client with timeout handling
+            try:
+                result = self.redis_binary_client.setex(key, ttl, compressed_content)
+                
+                if result:
+                    logger.info(f"Cached CSV data for user {user_id}, file {file_id}, size: {len(csv_content)} bytes (compressed: {len(compressed_content)} bytes)")
+                    return True
+                else:
+                    logger.warning(f"Failed to store CSV data in Redis for user {user_id}, file {file_id}")
+                    return False
+                    
+            except redis.TimeoutError as timeout_error:
+                logger.error(f"Redis timeout while caching CSV data for user {user_id}, file {file_id}: {timeout_error}")
                 return False
-                
-            # Store compressed binary data using binary client
-            result = self.redis_binary_client.setex(key, ttl, compressed_content)
-            
-            if result:
-                logger.info(f"Cached CSV data for user {user_id}, file {file_id}, size: {len(csv_content)} bytes (compressed: {len(compressed_content)} bytes)")
-            else:
-                logger.warning(f"Failed to store CSV data in Redis for user {user_id}, file {file_id}")
-                
-            return bool(result)
+            except redis.ConnectionError as conn_error:
+                logger.error(f"Redis connection error while caching CSV data for user {user_id}, file {file_id}: {conn_error}")
+                # Mark Redis as unavailable for future operations
+                self.is_available = False
+                return False
             
         except Exception as e:
             logger.error(f"Failed to cache CSV data for user {user_id}, file {file_id}: {e}")
             return False
     
+    @redis_retry(max_retries=3, delay=0.2)
     def get_cached_csv_data(self, user_id: str, file_id: str) -> Optional[str]:
         """
         Retrieve cached CSV data from Redis.
@@ -504,38 +549,49 @@ class RedisService:
             self._ensure_connection()
             key = f"csv_data:{user_id}:{file_id}"
             
-            if not self.redis_binary_client:
-                logger.error("Redis binary client is not available")
+            # Check Redis availability before attempting operation
+            if not self.is_available or not self.redis_binary_client:
+                logger.warning(f"Redis not available for retrieving CSV data for user {user_id}, file {file_id}")
                 return None
             
-            # Retrieve compressed binary data using binary client
-            compressed_data = self.redis_binary_client.get(key)
-            
-            if compressed_data:
-                # Validate that we got binary data
-                if not isinstance(compressed_data, bytes):
-                    logger.error(f"Expected binary data but got {type(compressed_data)} for user {user_id}, file {file_id}")
-                    return None
+            # Retrieve compressed binary data using binary client with timeout handling
+            try:
+                compressed_data = self.redis_binary_client.get(key)
                 
-                # Decompress the data
-                import gzip
-                try:
-                    csv_content = gzip.decompress(compressed_data).decode('utf-8')
-                    logger.debug(f"Retrieved cached CSV data for user {user_id}, file {file_id}, size: {len(csv_content)} bytes")
-                    return csv_content
-                except gzip.BadGzipFile as gzip_error:
-                    logger.error(f"Invalid gzip data for user {user_id}, file {file_id}: {gzip_error}")
-                    # Invalidate corrupted cache entry
-                    self.invalidate_csv_cache(user_id, file_id)
-                    return None
-                except UnicodeDecodeError as decode_error:
-                    logger.error(f"UTF-8 decode error for user {user_id}, file {file_id}: {decode_error}")
-                    # Invalidate corrupted cache entry
-                    self.invalidate_csv_cache(user_id, file_id)
-                    return None
-            
-            logger.debug(f"No cached CSV data found for user {user_id}, file {file_id}")
-            return None
+                if compressed_data:
+                    # Validate that we got binary data
+                    if not isinstance(compressed_data, bytes):
+                        logger.error(f"Expected binary data but got {type(compressed_data)} for user {user_id}, file {file_id}")
+                        return None
+                    
+                    # Decompress the data
+                    import gzip
+                    try:
+                        csv_content = gzip.decompress(compressed_data).decode('utf-8')
+                        logger.debug(f"Retrieved cached CSV data for user {user_id}, file {file_id}, size: {len(csv_content)} bytes")
+                        return csv_content
+                    except gzip.BadGzipFile as gzip_error:
+                        logger.error(f"Invalid gzip data for user {user_id}, file {file_id}: {gzip_error}")
+                        # Invalidate corrupted cache entry
+                        self.invalidate_csv_cache(user_id, file_id)
+                        return None
+                    except UnicodeDecodeError as decode_error:
+                        logger.error(f"UTF-8 decode error for user {user_id}, file {file_id}: {decode_error}")
+                        # Invalidate corrupted cache entry
+                        self.invalidate_csv_cache(user_id, file_id)
+                        return None
+                
+                logger.debug(f"No cached CSV data found for user {user_id}, file {file_id}")
+                return None
+                
+            except redis.TimeoutError as timeout_error:
+                logger.error(f"Redis timeout while retrieving CSV data for user {user_id}, file {file_id}: {timeout_error}")
+                return None
+            except redis.ConnectionError as conn_error:
+                logger.error(f"Redis connection error while retrieving CSV data for user {user_id}, file {file_id}: {conn_error}")
+                # Mark Redis as unavailable for future operations
+                self.is_available = False
+                return None
             
         except Exception as e:
             logger.error(f"Failed to retrieve cached CSV data for user {user_id}, file {file_id}: {e}")
@@ -783,6 +839,101 @@ class RedisService:
                 
         except Exception as e:
             logger.error(f"Failed to refresh cache for user {user_id}, file {file_id}: {e}")
+            return False
+
+    # Generic Caching Methods (for signed URLs and other data)
+    
+    def cache_data(self, key: str, data: Any, ttl: int = 3600) -> bool:
+        """
+        Cache arbitrary data in Redis with a custom key.
+        
+        Args:
+            key: Custom cache key
+            data: Data to cache (will be serialized)
+            ttl: Time to live in seconds (default: 1 hour)
+            
+        Returns:
+            True if cached successfully, False otherwise
+        """
+        if not self.is_available:
+            return False
+        
+        try:
+            # Skip _ensure_connection() for speed - assume connection is good
+            serialized_data = self._serialize_data(data)
+            
+            # Use pipeline for faster operations
+            pipe = self.redis_client.pipeline()
+            pipe.setex(key, ttl, serialized_data)
+            results = pipe.execute()
+            result = results[0]
+            
+            logger.debug(f"🚀 FAST Redis cache write: {key}, TTL: {ttl}s")
+            return bool(result)
+            
+        except Exception as e:
+            logger.error(f"Failed to cache data with key {key}: {e}")
+            return False
+    
+    def get_cached_data(self, key: str) -> Optional[Any]:
+        """
+        Retrieve arbitrary cached data from Redis with ultra-fast optimization.
+        
+        Args:
+            key: Cache key
+            
+        Returns:
+            Cached data if found, None otherwise
+        """
+        if not self.is_available:
+            return None
+        
+        try:
+            # Skip _ensure_connection() for speed - assume connection is good
+            import time
+            start_time = time.time()
+            
+            # Use pipeline for faster operations
+            pipe = self.redis_client.pipeline()
+            pipe.get(key)
+            results = pipe.execute()
+            cached_data = results[0]
+            
+            end_time = time.time()
+            
+            if cached_data:
+                deserialized_data = self._deserialize_data(cached_data)
+                logger.info(f"🚀 FAST Redis lookup: {key} ({(end_time - start_time)*1000:.1f}ms)")
+                return deserialized_data
+            
+            logger.debug(f"No cached data found for key: {key} (Redis lookup: {(end_time - start_time)*1000:.1f}ms)")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve cached data with key {key}: {e}")
+            return None
+    
+    def invalidate_cached_data(self, key: str) -> bool:
+        """
+        Invalidate cached data by key.
+        
+        Args:
+            key: Cache key to invalidate
+            
+        Returns:
+            True if invalidated successfully, False otherwise
+        """
+        if not self.is_available:
+            return False
+        
+        try:
+            self._ensure_connection()
+            result = self.redis_client.delete(key)
+            logger.debug(f"Invalidated cached data with key: {key}")
+            return bool(result)
+            
+        except Exception as e:
+            logger.error(f"Failed to invalidate cached data with key {key}: {e}")
             return False
 
 

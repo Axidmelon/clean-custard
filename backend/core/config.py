@@ -167,10 +167,11 @@ def validate_production_readiness() -> List[str]:
     """
     errors = []
 
-    # Check critical settings
+    # Only run strict validation in production environment
     if settings.environment != "production":
-        errors.append("ENVIRONMENT must be set to 'production'")
+        return errors  # Skip validation for non-production environments
 
+    # Check critical settings
     if settings.debug:
         errors.append("DEBUG must be set to 'false' in production")
 
@@ -187,7 +188,7 @@ def validate_production_readiness() -> List[str]:
     if settings.frontend_url.startswith("http://localhost"):
         errors.append("FRONTEND_URL should use HTTPS in production")
 
-    if not settings.sentry_dsn and settings.environment == "production":
+    if not settings.sentry_dsn:
         errors.append("SENTRY_DSN should be configured for production monitoring")
 
     if settings.rate_limit_enabled and not settings.rate_limit_redis_url:

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Bot, User, Database, RefreshCw, Upload, FileText, X, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,7 +29,7 @@ interface Message {
   code?: string;
   error?: string;
   error_type?: 'agent_disconnected' | 'query_failed' | 'network_error' | 'unknown';
-  data?: any[];
+  data?: Record<string, unknown>[];
   columns?: string[];
   row_count?: number;
   can_retry?: boolean;
@@ -62,6 +62,17 @@ export default function TalkData() {
   });
   const [csvLoadTimeout, setCsvLoadTimeout] = useState<NodeJS.Timeout | null>(null);
   const [loadingFiles, setLoadingFiles] = useState<Set<string>>(new Set());
+  const loadingFilesRef = useRef<Set<string>>(new Set());
+  const csvDataRef = useRef<{ [fileId: string]: CsvData } | null>(null);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    loadingFilesRef.current = loadingFiles;
+  }, [loadingFiles]);
+
+  useEffect(() => {
+    csvDataRef.current = csvData;
+  }, [csvData]);
   const [agentStatus, setAgentStatus] = useState<{ [connectionId: string]: boolean }>({});
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -81,38 +92,9 @@ export default function TalkData() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const cacheCsvFileForProcessing = async (fileId: string) => {
-    try {
-      console.log('🔄 Caching CSV file for processing:', fileId);
-      await csvCacheService.ensureCsvCached(fileId);
-      console.log('✅ CSV file cached successfully for processing');
-    } catch (error) {
-      console.warn('⚠️ Failed to cache CSV file for processing:', error);
-      // Don't throw error - this is optimization, not critical
-    }
-  };
-
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  // Load CSV data when CSV files are selected (load ALL selected files immediately)
-  useEffect(() => {
-    if (selectedCsvFileIds.length > 0) {
-      // Load preview data for ALL selected files immediately
-      selectedCsvFileIds.forEach(fileId => {
-        if (!csvData?.[fileId] && !loadingFiles.has(fileId)) {
-          loadCsvData(fileId);
-        }
-      });
-      // Cache all selected CSV files for processing
-      selectedCsvFileIds.forEach(fileId => {
-        cacheCsvFileForProcessing(fileId);
-      });
-    } else {
-      setCsvData(null);
-    }
-  }, [selectedCsvFileIds]);
 
   // Note: Removed auto-selection logic - users must manually select files
 
@@ -234,7 +216,7 @@ export default function TalkData() {
     }
   };
 
-  const loadCsvData = async (fileId: string) => {
+  const loadCsvData = useCallback(async (fileId: string) => {
     // Prevent multiple simultaneous requests for the same file
     if (loadingFiles.has(fileId)) {
       console.log('🔄 CSV already loading for file:', fileId);
@@ -326,14 +308,15 @@ export default function TalkData() {
         
         try {
           const urlStartTime = performance.now();
-          // Get signed URL from backend (10 minutes expiration for enhanced security)
-          const signedUrlResponse = await signedUrlService.getSignedUrl(fileId, 0.167); // 10 minutes = 0.167 hours
+          // Get signed URL from backend (4 hours expiration for better caching)
+          const signedUrlResponse = await signedUrlService.getSignedUrl(fileId, 4.0); // 4 hours for optimal caching
           const urlEndTime = performance.now();
           
           console.log('🔑 Got signed URL:', {
             fileName: selectedFile.name,
             urlGenerationTime: `${(urlEndTime - urlStartTime).toFixed(0)}ms`,
-            expirationTime: signedUrlResponse.expires_at
+            expirationTime: signedUrlResponse.expires_at,
+            cached: signedUrlResponse.cached || false
           });
           
           setCsvLoadProgress({
@@ -378,16 +361,27 @@ export default function TalkData() {
             message: 'Rendering preview...'
           });
           
+          // Update CSV data immediately for instant preview
           setCsvData(prev => ({
-          ...prev,
-          [fileId]: parsedData
-        }));
+            ...prev,
+            [fileId]: parsedData
+          }));
           
           setCsvLoadProgress({
             stage: 'complete',
             progress: 100,
             message: 'CSV preview ready'
           });
+          
+          // Cache CSV data for AI processing in background (non-blocking)
+          csvCacheService.cacheCsvFromData(fileId, content)
+            .then(() => {
+              console.log('✅ CSV data cached for AI processing:', selectedFile.name);
+            })
+            .catch((cacheError) => {
+              console.warn('⚠️ Failed to cache CSV data for AI processing:', cacheError);
+              // Don't fail the entire operation if caching fails
+            });
           
         } catch (signedUrlError) {
           console.warn('⚠️ Signed URL method failed, falling back to backend proxy:', {
@@ -430,6 +424,15 @@ export default function TalkData() {
           ...prev,
           [fileId]: parsedData
         }));
+            
+            // Cache the CSV data for AI processing (optimized flow)
+            try {
+              await csvCacheService.cacheCsvFromData(fileId, content);
+              console.log('✅ CSV data cached for AI processing (fallback):', selectedFile.name);
+            } catch (cacheError) {
+              console.warn('⚠️ Failed to cache CSV data for AI processing (fallback):', cacheError);
+              // Don't fail the entire operation if caching fails
+            }
             
             setCsvLoadProgress({
               stage: 'complete',
@@ -478,7 +481,23 @@ export default function TalkData() {
       });
       setIsLoadingCsv(false);
     }
-  };
+  }, [uploadedFiles, csvLoadTimeout, loadingFiles, setCsvLoadProgress, setCsvData, setCsvLoadTimeout, setIsLoadingCsv, setLoadingFiles]);
+
+  // Load CSV data when CSV files are selected (load ALL selected files immediately)
+  useEffect(() => {
+    if (selectedCsvFileIds.length > 0) {
+      // Load preview data for ALL selected files immediately
+      // Caching now happens automatically in loadCsvData (optimized flow)
+      selectedCsvFileIds.forEach(fileId => {
+        // Use refs to check current state without causing re-renders
+        if (!csvDataRef.current?.[fileId] && !loadingFilesRef.current.has(fileId)) {
+          loadCsvData(fileId);
+        }
+      });
+    } else {
+      setCsvData(null);
+    }
+  }, [selectedCsvFileIds, loadCsvData]); // Only depend on selectedCsvFileIds and loadCsvData
 
   // Check agent status when connection is selected
   useEffect(() => {
@@ -505,6 +524,16 @@ export default function TalkData() {
         ...prev,
         [connectionId]: false
       }));
+    }
+  };
+
+  const handleFileRemove = (fileId: string) => {
+    setSelectedCsvFileIds(prev => prev.filter(id => id !== fileId));
+    // Clear CSV data for the removed file
+    if (csvData) {
+      const newCsvData = { ...csvData };
+      delete newCsvData[fileId];
+      setCsvData(newCsvData);
     }
   };
 
@@ -622,7 +651,7 @@ export default function TalkData() {
     }
   };
 
-  const getErrorType = (error: any): 'agent_disconnected' | 'query_failed' | 'network_error' | 'unknown' => {
+  const getErrorType = (error: unknown): 'agent_disconnected' | 'query_failed' | 'network_error' | 'unknown' => {
     if (!error) return 'unknown';
     
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -640,7 +669,7 @@ export default function TalkData() {
     return 'unknown';
   };
 
-  const getErrorMessage = (error: any, errorType: string): string => {
+  const getErrorMessage = (error: unknown, errorType: string): string => {
     const baseMessage = error instanceof Error ? error.message : 'Unknown error';
     
     switch (errorType) {
@@ -755,11 +784,13 @@ export default function TalkData() {
             <MultiFileSelector
               files={uploadedFiles.filter(file => file.status === 'completed' && file.name.endsWith('.csv'))}
               selectedFileIds={selectedCsvFileIds}
-              onSelectionChange={(fileIds: string[]) => {
+              onSelectionChange={async (fileIds: string[]) => {
                 setSelectedCsvFileIds(fileIds);
                 // Clear database selection when CSV files are selected
                 if (fileIds.length > 0) {
                   setSelectedConnectionId("");
+                  // Caching now happens automatically in loadCsvData (optimized flow)
+                  console.log('📁 CSV files selected - preview and caching will happen automatically');
                 }
               }}
               maxFiles={10}
@@ -842,6 +873,7 @@ export default function TalkData() {
               uploadedFiles={uploadedFiles.filter(file => file.status === 'completed' && file.name.endsWith('.csv'))}
               maxPreviewRows={MAX_PREVIEW_ROWS}
               onFileDataLoad={loadCsvData}
+              onFileRemove={handleFileRemove}
               csvData={csvData}
               isLoadingCsv={isLoadingCsv}
               loadingFiles={loadingFiles}

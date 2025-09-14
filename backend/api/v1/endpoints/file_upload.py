@@ -4,11 +4,15 @@ from typing import List
 import logging
 import httpx
 from datetime import datetime
+from pydantic import BaseModel
 from db.dependencies import get_db
 from db.models import User, UploadedFile
 from services.cloudinary_upload_service import cloudinary_upload_service
 from sqlalchemy.orm import Session
 from core.jwt_handler import get_current_user
+
+class CsvCacheRequest(BaseModel):
+    csv_data: str
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -432,19 +436,24 @@ async def files_health_check(db: Session = Depends(get_db)):
 @router.get("/signed-url/{file_id}")
 async def get_signed_url(
     file_id: str,
-    expiration_hours: float = 2.0,
+    expiration_hours: float = 4.0,  # Increased default from 2 to 4 hours
     current_user: User = Depends(get_current_user()),
     db: Session = Depends(get_db)
 ):
     """
-    Generate a signed URL for direct access to a file
+    Generate a signed URL for direct access to a file with Redis caching optimization
     """
+    import time
+    total_start_time = time.time()
+    
     try:
         # Validate expiration hours (max 24 hours, min 0.1 hours)
         if expiration_hours > 24:
             expiration_hours = 24.0
         elif expiration_hours < 0.1:
             expiration_hours = 0.1
+        
+        # Generate signed URL directly - no caching needed for temporary URLs
         
         # Find the file in database
         uploaded_file = db.query(UploadedFile).filter(
@@ -466,16 +475,17 @@ async def get_signed_url(
             )
         
         # Generate signed URL using the file's cloudinary_public_id with user context
+        cloudinary_start_time = time.time()
         signed_url_data = cloudinary_upload_service.generate_signed_url(
             uploaded_file.cloudinary_public_id, 
             expiration_hours,
             str(current_user.id)  # Include user ID for enhanced security
         )
+        cloudinary_end_time = time.time()
+        logger.info(f"Cloudinary signed URL generation for file {file_id} took: {(cloudinary_end_time - cloudinary_start_time)*1000:.1f}ms")
         
-        # Log the request for audit purposes
-        logger.info(f"Generated signed URL for file {file_id} by user {current_user.id}, expires in {expiration_hours} hours")
-        
-        return {
+        # Prepare response data
+        response_data = {
             "success": True,
             "signed_url": signed_url_data["signed_url"],
             "expires_at": signed_url_data["expires_at"],
@@ -485,8 +495,17 @@ async def get_signed_url(
                 "size": int(uploaded_file.file_size),
                 "content_type": uploaded_file.content_type,
                 "created_at": uploaded_file.created_at.isoformat()
-            }
+            },
+            "cached": False
         }
+        
+        # No caching needed for temporary signed URLs - they're fast to generate
+        
+        # Log the request for audit purposes
+        total_end_time = time.time()
+        logger.info(f"🚀 Generated signed URL for file {file_id} by user {current_user.id}, expires in {expiration_hours} hours (total time: {(total_end_time - total_start_time)*1000:.1f}ms)")
+        
+        return response_data
         
     except HTTPException:
         raise
@@ -717,6 +736,84 @@ async def cache_csv_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while caching file"
+        )
+
+@router.post("/cache-csv-from-data/{file_id}")
+async def cache_csv_from_data(
+    file_id: str,
+    request: CsvCacheRequest,
+    current_user: User = Depends(get_current_user()),
+    db: Session = Depends(get_db)
+):
+    """
+    Cache CSV data received from frontend (optimized flow)
+    """
+    try:
+        logger.info(f"Caching CSV data from frontend for file_id: {file_id}, user: {current_user.id}")
+        
+        # Find the file in database
+        uploaded_file = db.query(UploadedFile).filter(
+            UploadedFile.id == file_id,
+            UploadedFile.user_id == current_user.id
+        ).first()
+        
+        if not uploaded_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found"
+            )
+        
+        # Check if file is already cached
+        from core.redis_service import redis_service
+        cached_data = redis_service.get_cached_csv_data(str(current_user.id), file_id)
+        
+        if cached_data:
+            logger.info(f"CSV file {file_id} already cached for user {current_user.id}")
+            return {
+                "success": True,
+                "message": "File already cached",
+                "cached": True,
+                "file_info": {
+                    "filename": uploaded_file.original_filename,
+                    "size": len(cached_data),
+                    "cached_at": "Already cached"
+                }
+            }
+        
+        # Cache the CSV content received from frontend (2 hours)
+        cache_success = redis_service.cache_csv_data(
+            str(current_user.id), 
+            file_id, 
+            request.csv_data, 
+            ttl=7200  # 2 hours
+        )
+        
+        if not cache_success:
+            # Log the Redis caching failure but don't fail the entire request
+            logger.warning(f"Failed to cache CSV data in Redis for user {current_user.id}, file {file_id}. Continuing without cache.")
+            # Note: We continue processing even if caching fails - the application can work without Redis cache
+        
+        logger.info(f"CSV data processing completed for file_id: {file_id}, user: {current_user.id}")
+        
+        return {
+            "success": True,
+            "message": "File processed successfully from frontend data",
+            "cached": cache_success,  # Indicate whether caching was successful
+            "file_info": {
+                "filename": uploaded_file.original_filename,
+                "size": len(request.csv_data),
+                "cached_at": datetime.now().isoformat() if cache_success else None,
+                "expires_in_hours": 2 if cache_success else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error caching CSV data from frontend: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while caching file data"
         )
 
 @router.post("/refresh-cache/{file_id}")

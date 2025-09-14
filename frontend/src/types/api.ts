@@ -60,7 +60,7 @@ export interface QueryRequest {
 export interface QueryResponse {
   answer: string;
   sql_query: string;
-  data: any[];
+  data: Record<string, unknown>[];
   columns: string[];
   row_count: number;
   ai_routing?: {

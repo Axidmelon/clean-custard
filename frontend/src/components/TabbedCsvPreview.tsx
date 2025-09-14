@@ -8,7 +8,7 @@ import {
   TableRow 
 } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
-import { FileSpreadsheet, BarChart3, ChevronDown, ChevronUp } from "lucide-react";
+import { FileSpreadsheet, BarChart3, ChevronDown, ChevronUp, X } from "lucide-react";
 
 interface CsvData {
   headers: string[];
@@ -27,6 +27,7 @@ interface TabbedCsvPreviewProps {
   uploadedFiles: CsvFileInfo[];
   maxPreviewRows?: number;
   onFileDataLoad: (fileId: string) => Promise<void>;
+  onFileRemove?: (fileId: string) => void;
   csvData: { [fileId: string]: CsvData } | null;
   isLoadingCsv: boolean;
   loadingFiles: Set<string>;
@@ -43,6 +44,7 @@ export const TabbedCsvPreview: React.FC<TabbedCsvPreviewProps> = ({
   uploadedFiles,
   maxPreviewRows = 50,
   onFileDataLoad,
+  onFileRemove,
   csvData,
   loadingFiles,
   csvLoadProgress,
@@ -69,20 +71,32 @@ export const TabbedCsvPreview: React.FC<TabbedCsvPreviewProps> = ({
     }
   }, [csvData]);
 
-  // Load data for ALL selected files immediately (not just active tab)
-  useEffect(() => {
-    selectedFileIds.forEach(fileId => {
-      if (!loadedFilesRef.current.has(fileId) && !loadingFiles.has(fileId)) {
-        onFileDataLoad(fileId);
-      }
-    });
-  }, [selectedFileIds, loadingFiles, onFileDataLoad]);
+  // Note: File loading is now handled by TalkData.tsx to prevent redundant requests
+  // This component only displays the loaded data
 
   const toggleTabCollapse = (fileId: string) => {
     setCollapsedTabs(prev => ({
       ...prev,
       [fileId]: !prev[fileId]
     }));
+  };
+
+  const handleFileRemove = (fileId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent tab selection when clicking the cross icon
+    
+    if (onFileRemove) {
+      onFileRemove(fileId);
+    }
+    
+    // If the removed file was active, switch to another tab
+    if (activeTabId === fileId) {
+      const remainingFiles = selectedFileIds.filter(id => id !== fileId);
+      if (remainingFiles.length > 0) {
+        setActiveTabId(remainingFiles[0]);
+      } else {
+        setActiveTabId(null);
+      }
+    }
   };
 
   const getFileInfo = (fileId: string) => {
@@ -115,7 +129,7 @@ export const TabbedCsvPreview: React.FC<TabbedCsvPreviewProps> = ({
               onClick={() => setActiveTabId(fileId)}
               className={`
                 flex items-center gap-2 px-4 py-2 text-sm font-medium border-r border-gray-200 dark:border-gray-700
-                transition-all duration-200 min-w-0 flex-shrink-0
+                transition-all duration-200 min-w-0 flex-shrink-0 group
                 ${isActive 
                   ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-b-2 border-blue-500' 
                   : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -131,6 +145,16 @@ export const TabbedCsvPreview: React.FC<TabbedCsvPreviewProps> = ({
                 <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
                   ({formatFileSize(fileInfo.size)})
                 </span>
+              )}
+              {onFileRemove && (
+                <button
+                  onClick={(e) => handleFileRemove(fileId, e)}
+                  className="ml-1 p-0.5 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                  aria-label={`Remove ${fileInfo?.name || 'file'}`}
+                  title={`Remove ${fileInfo?.name || 'file'}`}
+                >
+                  <X className="w-3 h-3 text-red-600 dark:text-red-400" />
+                </button>
               )}
             </button>
           );

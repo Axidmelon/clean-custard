@@ -26,6 +26,7 @@ class AnalysisContext:
     file_type: Optional[str] = None
     data_source: Optional[str] = None
     user_preference: Optional[str] = None
+    user_id: Optional[str] = None
 
 class AIRoutingAgent:
     """
@@ -339,15 +340,34 @@ Respond with ONLY the JSON, no other text:"""
                     "user_preference": context.user_preference if context else None
                 }
                 
-                # Get schema information for all files to make intelligent decisions
-                from services.data_analysis_service import data_analysis_service
-                schemas_info = {}
-                for file_id in file_ids:
-                    try:
-                        schema_info = await data_analysis_service.analyze_data_schema(file_id)
-                        schemas_info[file_id] = schema_info
-                    except Exception as e:
-                        self.logger.warning(f"Could not get schema for file {file_id}: {e}")
+                # Get schema information from cached CSV data for intelligent decisions
+                from services.csv_schema_analyzer import csv_schema_analyzer
+                from core.redis_service import redis_service
+                
+                # Get user ID from context (we'll need to pass this)
+                user_id = getattr(context, 'user_id', None) if context else None
+                if not user_id:
+                    self.logger.warning("No user_id in context, using fallback schema analysis")
+                    # Fallback to original method
+                    from services.data_analysis_service import data_analysis_service
+                    schemas_info = {}
+                    for file_id in file_ids:
+                        try:
+                            schema_info = await data_analysis_service.analyze_data_schema(file_id)
+                            schemas_info[file_id] = schema_info
+                        except Exception as e:
+                            self.logger.warning(f"Could not get schema for file {file_id}: {e}")
+                else:
+                    # Use cached CSV data for schema analysis
+                    self.logger.info(f"Analyzing cached CSV schemas for user {user_id}")
+                    schema_analysis = csv_schema_analyzer.analyze_multiple_files(file_ids, user_id)
+                    schemas_info = schema_analysis.get("file_schemas", {})
+                    
+                    # Get AI routing recommendations based on schema
+                    routing_recommendations = csv_schema_analyzer.get_ai_routing_recommendation(
+                        file_ids, user_id, question
+                    )
+                    self.logger.info(f"Schema-based routing recommendation: {routing_recommendations['recommended_service']}")
                 
                 # Build enhanced prompt for multi-file analysis with schema information
                 prompt = self._build_multi_file_routing_prompt(question, file_ids, schemas_info, context)

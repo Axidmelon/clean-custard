@@ -19,16 +19,15 @@ import EmailVerification from "./pages/EmailVerification";
 import ResetPassword from "./pages/ResetPassword";
 import { useEffect } from "react";
 import { logDebug } from "./lib/logger";
+import { statusManager } from "./hooks/useWebSocketStatus";
 
 const queryClient = new QueryClient();
 
 // Component to initialize status WebSocket connection
 const StatusWebSocketInitializer = () => {
   useEffect(() => {
-    // Import the status manager to ensure it's initialized
-    import('./hooks/useWebSocketStatus').then(({ statusManager }) => {
-      logDebug('Status WebSocket manager initialized');
-    });
+    // Initialize the status manager
+    logDebug('Status WebSocket manager initialized');
   }, []);
   
   return null;

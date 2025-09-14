@@ -123,7 +123,7 @@ class FileUploadService {
     return response.json();
   }
 
-  async getUploadedFiles(): Promise<{ success: boolean; files: any[]; count: number }> {
+  async getUploadedFiles(): Promise<{ success: boolean; files: Record<string, unknown>[]; count: number }> {
     try {
       const response = await fetch(`${getApiBaseUrl()}/files/list`, {
         method: 'GET',
@@ -183,7 +183,7 @@ class FileUploadService {
     return response.json();
   }
 
-  async getFilesHealthStatus(): Promise<{ service: string; status: string; timestamp: string; checks: any }> {
+  async getFilesHealthStatus(): Promise<{ service: string; status: string; timestamp: string; checks: Record<string, unknown> }> {
     try {
       const response = await fetch(`${getApiBaseUrl()}/files/health`, {
         method: 'GET',
@@ -220,7 +220,7 @@ class FileUploadService {
   }
 
   // Helper method to convert backend file list data to frontend UploadedFile format
-  convertFileListToUploadedFiles(files: any[]): UploadedFile[] {
+  convertFileListToUploadedFiles(files: Record<string, unknown>[]): UploadedFile[] {
     return files.map(file => ({
       id: file.id,
       name: file.original_filename,
