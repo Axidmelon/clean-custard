@@ -76,7 +76,7 @@ class LangSmithService:
     @contextmanager
     def create_trace(self, name: str, metadata: Optional[Dict[str, Any]] = None):
         """
-        Create a LangSmith trace context manager.
+        Create a LangSmith trace context manager with enhanced error handling.
         
         Args:
             name: Name of the trace
@@ -105,8 +105,11 @@ class LangSmithService:
             return
         
         try:
+            # Sanitize initial metadata to prevent serialization issues
+            sanitized_metadata = self._sanitize_metadata(metadata or {})
+            
             # Create trace with LangSmith - use inputs instead of metadata
-            with trace(name, inputs=metadata or {}) as trace_obj:
+            with trace(name, inputs=sanitized_metadata) as trace_obj:
                 # Create a wrapper that provides metadata access
                 class TraceWrapper:
                     def __init__(self, trace_obj, initial_metadata):
@@ -116,18 +119,17 @@ class LangSmithService:
                     def __getattr__(self, name):
                         return getattr(self._trace_obj, name)
                 
-                wrapper = TraceWrapper(trace_obj, metadata)
+                wrapper = TraceWrapper(trace_obj, sanitized_metadata)
                 yield wrapper
         except Exception as e:
             logger.error(f"Error creating LangSmith trace '{name}': {e}")
-            # Disable tracing for future calls to prevent repeated errors
-            self._initialized = False
-            settings.langsmith_tracing_enabled = False
+            # Don't disable tracing completely - just log the error and continue
+            logger.warning(f"LangSmith trace '{name}' failed, continuing without tracing")
             
             # Fallback to dummy trace - don't let this exception propagate
             class DummyTrace:
-                def __init__(self):
-                    self.metadata = metadata or {}
+                def __init__(self, sanitized_metadata):
+                    self.metadata = sanitized_metadata
                 
                 def __enter__(self):
                     return self
@@ -135,8 +137,22 @@ class LangSmithService:
                 def __exit__(self, exc_type, exc_val, exc_tb):
                     pass
             
-            dummy = DummyTrace()
+            dummy = DummyTrace(sanitized_metadata)
             yield dummy
+    
+    def create_safe_trace(self, name: str, metadata: Optional[Dict[str, Any]] = None):
+        """
+        Create a safe LangSmith trace that automatically handles all serialization issues.
+        This is the recommended method for permanent LangSmith tracing.
+        
+        Args:
+            name: Name of the trace
+            metadata: Optional metadata to attach to the trace
+            
+        Returns:
+            Context manager for the trace
+        """
+        return self.create_trace(name, metadata)
     
     def add_metadata(self, trace_obj, metadata: Dict[str, Any]):
         """
@@ -147,12 +163,88 @@ class LangSmithService:
             metadata: Metadata dictionary to add
         """
         try:
+            # Sanitize metadata to prevent serialization issues
+            sanitized_metadata = self._sanitize_metadata(metadata)
+            
             if hasattr(trace_obj, 'metadata') and trace_obj.metadata is not None:
-                trace_obj.metadata.update(metadata)
+                trace_obj.metadata.update(sanitized_metadata)
             else:
-                trace_obj.metadata = metadata
+                trace_obj.metadata = sanitized_metadata
         except Exception as e:
             logger.error(f"Error adding metadata to trace: {e}")
+    
+    def _sanitize_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Sanitize metadata to prevent LangSmith serialization issues.
+        
+        Args:
+            metadata: Raw metadata dictionary
+            
+        Returns:
+            Sanitized metadata dictionary
+        """
+        sanitized = {}
+        
+        for key, value in metadata.items():
+            try:
+                # Skip problematic keys that cause LangSmith issues
+                if key in ['file_schemas', 'file_info', 'statistical_summary', 'sample_data', 'columns', 'data_types', 'null_counts', 'unique_counts']:
+                    sanitized[key] = f"<complex_data: {type(value).__name__}>"
+                    continue
+                
+                # Convert complex objects to strings or simple types
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    sanitized[key] = value
+                elif isinstance(value, (list, tuple)):
+                    # Convert lists to simple representations
+                    sanitized[key] = [str(item) for item in value[:10]]  # Limit to first 10 items
+                elif isinstance(value, dict):
+                    # Recursively sanitize nested dictionaries
+                    sanitized[key] = self._sanitize_nested_dict(value, max_depth=2)
+                else:
+                    # Convert everything else to string
+                    sanitized[key] = str(value)
+            except Exception as e:
+                logger.warning(f"Error sanitizing metadata key '{key}': {e}")
+                sanitized[key] = f"<error: {str(e)}>"
+        
+        return sanitized
+    
+    def _sanitize_nested_dict(self, data: Dict[str, Any], max_depth: int = 2, current_depth: int = 0) -> Dict[str, Any]:
+        """
+        Recursively sanitize nested dictionaries.
+        
+        Args:
+            data: Dictionary to sanitize
+            max_depth: Maximum depth to recurse
+            current_depth: Current recursion depth
+            
+        Returns:
+            Sanitized dictionary
+        """
+        if current_depth >= max_depth:
+            return f"<max_depth_reached: {len(data)} items>"
+        
+        sanitized = {}
+        for key, value in data.items():
+            try:
+                # Skip problematic keys
+                if key in ['file_info', 'statistical_summary', 'sample_data', 'columns', 'data_types', 'null_counts', 'unique_counts', 'sample_values']:
+                    sanitized[key] = f"<complex_data: {type(value).__name__}>"
+                    continue
+                
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    sanitized[key] = value
+                elif isinstance(value, (list, tuple)):
+                    sanitized[key] = [str(item) for item in value[:5]]  # Limit to first 5 items
+                elif isinstance(value, dict):
+                    sanitized[key] = self._sanitize_nested_dict(value, max_depth, current_depth + 1)
+                else:
+                    sanitized[key] = str(value)
+            except Exception as e:
+                sanitized[key] = f"<error: {str(e)}>"
+        
+        return sanitized
     
     def log_trace_event(self, event_type: str, message: str, metadata: Optional[Dict[str, Any]] = None):
         """

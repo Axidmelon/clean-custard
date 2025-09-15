@@ -65,28 +65,30 @@ class RedisService:
             redis_url = os.getenv('REDIS_URL') or getattr(settings, 'redis_url', 'redis://localhost:6379/0')
             
             # Use redis.from_url() for proper URL parsing (handles auth, cloud URLs, etc.)
-            self.redis_client = redis.from_url(
-                redis_url,
-                decode_responses=True,
-                socket_timeout=5.0,  # Increased timeout for stability
-                socket_connect_timeout=3.0,  # Increased connection timeout
-                retry_on_timeout=True,  # Enable retry on timeout for reliability
-                health_check_interval=30,  # More frequent health checks
-                max_connections=20,  # Reasonable connection pool size
-                socket_keepalive=True  # Keep connections alive
-            )
+            redis_config = {
+                'decode_responses': True,
+                'socket_timeout': 10.0,  # Increased timeout for stability
+                'socket_connect_timeout': 5.0,  # Increased connection timeout
+                'retry_on_timeout': True,  # Enable retry on timeout for reliability
+                'health_check_interval': 30,  # More frequent health checks
+                'max_connections': 20,  # Reasonable connection pool size
+                'socket_keepalive': True,  # Keep connections alive
+            }
+            
+            self.redis_client = redis.from_url(redis_url, **redis_config)
             
             # Create separate Redis client for binary data (CSV caching)
-            self.redis_binary_client = redis.from_url(
-                redis_url,
-                decode_responses=False,  # Keep binary data as bytes
-                socket_timeout=10.0,  # Longer timeout for binary data operations
-                socket_connect_timeout=3.0,  # Increased connection timeout
-                retry_on_timeout=True,  # Enable retry on timeout for reliability
-                health_check_interval=30,  # More frequent health checks
-                max_connections=20,  # Reasonable connection pool size
-                socket_keepalive=True  # Keep connections alive
-            )
+            binary_redis_config = {
+                'decode_responses': False,  # Keep binary data as bytes
+                'socket_timeout': 15.0,  # Longer timeout for binary data operations
+                'socket_connect_timeout': 5.0,  # Increased connection timeout
+                'retry_on_timeout': True,  # Enable retry on timeout for reliability
+                'health_check_interval': 30,  # More frequent health checks
+                'max_connections': 20,  # Reasonable connection pool size
+                'socket_keepalive': True,  # Keep connections alive
+            }
+            
+            self.redis_binary_client = redis.from_url(redis_url, **binary_redis_config)
             
             # Test connection with timeout
             self.redis_client.ping()
@@ -121,10 +123,14 @@ class RedisService:
             self._connect()
         elif self.redis_client and self.redis_binary_client:
             try:
+                # Test connection with timeout
                 self.redis_client.ping()
                 self.redis_binary_client.ping()
-            except Exception:
-                logger.warning("Redis connection lost, attempting to reconnect...")
+            except (redis.ConnectionError, redis.TimeoutError, redis.RedisError) as e:
+                logger.warning(f"Redis connection lost: {e}, attempting to reconnect...")
+                self._connect()
+            except Exception as e:
+                logger.warning(f"Unexpected Redis error: {e}, attempting to reconnect...")
                 self._connect()
     
     def _serialize_data(self, data: Any) -> str:
@@ -488,8 +494,15 @@ class RedisService:
             key = f"csv_data:{user_id}:{file_id}"
             
             # Validate input data
-            if not csv_content or not isinstance(csv_content, str):
-                logger.error(f"Invalid CSV content for user {user_id}, file {file_id}")
+            if not csv_content:
+                logger.error(f"Empty CSV content for user {user_id}, file {file_id}")
+                return False
+            
+            # Ensure content is string
+            if isinstance(csv_content, bytes):
+                csv_content = csv_content.decode('utf-8')
+            elif not isinstance(csv_content, str):
+                logger.error(f"Invalid CSV content type {type(csv_content)} for user {user_id}, file {file_id}")
                 return False
             
             # Check Redis availability before attempting operation

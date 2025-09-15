@@ -40,14 +40,15 @@ class CSVToSQLConverter:
         
         logger.info("CSVToSQLConverter initialized successfully")
     
-    async def convert_csv_to_sql(self, file_id: str, csv_data: str = None, user_id: str = None) -> str:
+    async def convert_csv_to_sql(self, file_id: str, csv_data: str = None, user_id: str = None, request_id: str = None) -> str:
         """
-        Convert CSV data to SQLite table with Redis caching optimization.
+        Convert CSV data to SQLite table with Redis caching optimization and working memory integration.
         
         Args:
             file_id: Unique identifier for the file
             csv_data: CSV content as string (optional if user_id provided)
             user_id: User ID for Redis cache lookup
+            request_id: Request ID for working memory lookup
             
         Returns:
             Table name for SQL queries
@@ -63,6 +64,15 @@ class CSVToSQLConverter:
             if file_id in self.connections:
                 logger.info(f"File {file_id} already converted, returning existing table")
                 return self.table_names[file_id]
+            
+            # Check working memory first for schema information (new approach)
+            if request_id:
+                from core.working_memory import working_memory_service
+                cached_schema = working_memory_service.get_schema_analysis(request_id, [file_id])
+                if cached_schema:
+                    logger.info(f"🧠 Using working memory schema for CSV to SQL conversion: {file_id}")
+                    # We can use the schema info to optimize the conversion process
+                    # For now, we'll continue with the normal conversion but log that we have schema info
             
             # Get CSV data from Redis cache if not provided
             if csv_data is None and user_id:

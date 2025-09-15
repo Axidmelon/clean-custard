@@ -105,12 +105,15 @@ PANDAS CODE:
         self.query_prompt = ChatPromptTemplate.from_template(prompt_template)
         self.query_chain = self.query_prompt | self.llm
     
-    async def analyze_data_schema(self, file_id: str, user_id: str = None) -> Dict[str, Any]:
+    async def analyze_data_schema(self, file_id: str, user_id: str = None, request_id: str = None) -> Dict[str, Any]:
         """
         Analyze CSV file and return detailed schema information.
+        Now uses working memory to share schema analysis across services.
         
         Args:
             file_id: ID of the uploaded CSV file
+            user_id: User ID for Redis cache lookup
+            request_id: Request ID for working memory lookup
             
         Returns:
             Dictionary containing schema analysis
@@ -118,20 +121,33 @@ PANDAS CODE:
         try:
             logger.info(f"Starting schema analysis for file_id: {file_id}")
             
-            # Check if schema is already cached
+            # Check working memory first (new approach)
+            if request_id:
+                from core.working_memory import working_memory_service
+                cached_schema = working_memory_service.get_schema_analysis(request_id, [file_id])
+                if cached_schema:
+                    logger.info(f"🧠 Using working memory schema for file_id: {file_id}")
+                    file_schemas = cached_schema.get('file_schemas', {})
+                    if file_id in file_schemas:
+                        # Convert from standardized format to data analysis service format
+                        from schemas.schema_interface import SchemaConverter
+                        standard_schema = SchemaConverter.convert_to_standard(file_schemas[file_id], 'csv_schema_analyzer')
+                        return SchemaConverter.convert_to_data_analysis_service(standard_schema)
+            
+            # Check if schema is already cached in service
             if file_id in self.schema_cache:
-                logger.info(f"Schema found in cache for file_id: {file_id}")
+                logger.info(f"Schema found in service cache for file_id: {file_id}")
                 return self.schema_cache[file_id]
             
             # Get CSV data
-            df = await self._get_csv_data(file_id)
+            df = await self._get_csv_data(file_id, user_id)
             if df is None:
                 raise ValueError(f"Could not load CSV data for file_id: {file_id}")
             
             # Analyze schema
             schema_info = self._analyze_dataframe_schema(df)
             
-            # Cache the schema
+            # Cache the schema in service cache
             self.schema_cache[file_id] = schema_info
             
             logger.info(f"Schema analysis completed for file_id: {file_id}")
@@ -659,12 +675,23 @@ PANDAS CODE:
                     "display_type": "table"
                 })
             elif isinstance(result, pd.Series):
-                formatted_result.update({
-                    "data": result.head(100).to_dict(),
-                    "columns": [result.name] if result.name else ["value"],
-                    "row_count": len(result),
-                    "display_type": "series"
-                })
+                # Convert Series to list format for API compatibility
+                if len(result) == 1:
+                    # Single value - convert to list format
+                    formatted_result.update({
+                        "data": [[result.iloc[0]]],
+                        "columns": [result.name] if result.name else ["value"],
+                        "row_count": 1,
+                        "display_type": "single_value"
+                    })
+                else:
+                    # Multiple values - convert to list of lists
+                    formatted_result.update({
+                        "data": [[idx, val] for idx, val in result.head(100).items()],
+                        "columns": ["index", result.name] if result.name else ["index", "value"],
+                        "row_count": len(result),
+                        "display_type": "series"
+                    })
             elif isinstance(result, dict):
                 # Handle statistical results dictionary
                 formatted_result.update({
@@ -1169,7 +1196,8 @@ Response:"""
         question: str, 
         user_id: str = None,
         user_preference: str = None,
-        force_multi_file: bool = False
+        force_multi_file: bool = False,
+        request_id: str = None
     ) -> Dict[str, Any]:
         """
         Process a natural language question with intelligent file selection and routing.
@@ -1195,7 +1223,7 @@ Response:"""
             
             # Step 1: AI analyzes question complexity and determines optimal approach
             analysis_plan = await self._analyze_question_complexity(
-                question, file_ids, user_preference, force_multi_file
+                question, file_ids, user_preference, force_multi_file, user_id, request_id
             )
             
             logger.info(f"AI analysis plan: {analysis_plan}")
@@ -1233,7 +1261,9 @@ Response:"""
         question: str, 
         available_files: List[str], 
         user_preference: str = None,
-        force_multi_file: bool = False
+        force_multi_file: bool = False,
+        user_id: str = None,
+        request_id: str = None
     ) -> Dict[str, Any]:
         """
         Use AI to analyze question complexity and determine optimal file combination.
@@ -1248,10 +1278,10 @@ Response:"""
             Analysis plan with required files and approach
         """
         try:
-            # Get schema information for all available files
+            # Get schema information for all available files using working memory
             schemas_info = {}
             for file_id in available_files:
-                schema_info = await self.analyze_data_schema(file_id)
+                schema_info = await self.analyze_data_schema(file_id, user_id, request_id)
                 schemas_info[file_id] = schema_info
             
             # Create enhanced prompt for AI analysis
@@ -1291,7 +1321,27 @@ RESPONSE:"""
             
             # Use LLM to analyze question complexity
             response = await self.llm.ainvoke(prompt)
-            analysis_plan = json.loads(response.content.strip())
+            
+            # Clean and parse JSON response
+            response_content = response.content.strip()
+            
+            # Remove markdown formatting if present
+            if response_content.startswith("```json"):
+                response_content = response_content[7:]
+            elif response_content.startswith("```"):
+                response_content = response_content[3:]
+            
+            if response_content.endswith("```"):
+                response_content = response_content[:-3]
+            
+            # Find JSON object boundaries
+            start_idx = response_content.find('{')
+            end_idx = response_content.rfind('}')
+            
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                response_content = response_content[start_idx:end_idx + 1]
+            
+            analysis_plan = json.loads(response_content.strip())
             
             # Validate analysis plan
             if not analysis_plan.get('required_files'):
@@ -1313,6 +1363,15 @@ RESPONSE:"""
             
         except Exception as e:
             logger.error(f"Error analyzing question complexity: {e}")
+            
+            # Proper cleanup of any partial state
+            try:
+                # Clean up any partial analysis state
+                if hasattr(self, '_current_analysis'):
+                    delattr(self, '_current_analysis')
+            except Exception as cleanup_error:
+                logger.warning(f"Error during cleanup: {cleanup_error}")
+            
             # Fallback to single file analysis
             return {
                 'required_files': available_files[:1],

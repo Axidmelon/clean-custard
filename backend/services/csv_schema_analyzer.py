@@ -161,7 +161,7 @@ class CSVSchemaAnalyzer:
                     file_schemas[file_id] = schema
                     
                     # Track columns for relationship analysis
-                    file_columns = set(schema.get("columns", []))
+                    file_columns = set([col["name"] for col in schema.get("columns", [])])
                     all_columns.update(file_columns)
                     
                     if common_columns is None:
@@ -170,17 +170,20 @@ class CSVSchemaAnalyzer:
                         common_columns = common_columns.intersection(file_columns)
             
             # Multi-file analysis
+            common_columns_list = list(common_columns) if common_columns is not None else []
+            relationship_score = len(common_columns_list) / len(all_columns) if all_columns else 0
+            
             analysis_result = {
                 "file_count": len(file_schemas),
                 "file_schemas": file_schemas,
                 "total_unique_columns": len(all_columns),
-                "common_columns": list(common_columns) if common_columns else [],
-                "relationship_score": len(common_columns) / len(all_columns) if all_columns else 0,
+                "common_columns": common_columns_list,
+                "relationship_score": relationship_score,
                 "suggested_analysis_type": self._suggest_multi_file_analysis(file_schemas),
                 "analysis_timestamp": pd.Timestamp.now().isoformat()
             }
             
-            self.logger.info(f"Multi-file analysis completed: {len(file_schemas)} files, {len(common_columns)} common columns")
+            self.logger.info(f"Multi-file analysis completed: {len(file_schemas)} files, {len(common_columns_list)} common columns")
             return analysis_result
             
         except Exception as e:
@@ -215,22 +218,18 @@ class CSVSchemaAnalyzer:
         except Exception:
             return "data_exploration"
     
-    def get_ai_routing_recommendation(self, file_ids: List[str], user_id: str, question: str) -> Dict[str, Any]:
+    def get_ai_routing_recommendation_from_analysis(self, schema_analysis: Dict[str, Any], question: str) -> Dict[str, Any]:
         """
-        Provide AI routing recommendations based on schema analysis.
+        Provide AI routing recommendations based on existing schema analysis.
         
         Args:
-            file_ids: List of file IDs
-            user_id: User ID for cache access
+            schema_analysis: Existing schema analysis results
             question: User's question for context
             
         Returns:
             Dictionary with routing recommendations
         """
         try:
-            # Analyze files
-            multi_file_analysis = self.analyze_multiple_files(file_ids, user_id)
-            
             # Analyze question for intent
             question_intent = self._analyze_question_intent(question)
             
@@ -239,15 +238,19 @@ class CSVSchemaAnalyzer:
                 "recommended_service": "csv_to_sql_converter",  # Default
                 "confidence": 0.7,
                 "reasoning": "Default recommendation",
-                "schema_analysis": multi_file_analysis,
+                "schema_analysis": schema_analysis,
                 "question_intent": question_intent,
                 "optimization_suggestions": []
             }
             
             # Determine best service based on analysis
-            if len(file_ids) == 1:
+            file_schemas = schema_analysis.get("file_schemas", {})
+            file_count = len(file_schemas)
+            
+            if file_count == 1:
                 # Single file analysis
-                file_schema = multi_file_analysis.get("file_schemas", {}).get(file_ids[0], {})
+                file_id = list(file_schemas.keys())[0]
+                file_schema = file_schemas[file_id]
                 if file_schema.get("data_quality_score", 0) > 80:
                     recommendations["recommended_service"] = "data_analysis_service"
                     recommendations["confidence"] = 0.9
@@ -258,7 +261,7 @@ class CSVSchemaAnalyzer:
                     recommendations["reasoning"] = "Single file with moderate quality, SQL conversion recommended"
             else:
                 # Multi-file analysis
-                relationship_score = multi_file_analysis.get("relationship_score", 0)
+                relationship_score = schema_analysis.get("relationship_score", 0)
                 if relationship_score > 0.3:
                     recommendations["recommended_service"] = "csv_to_sql_converter"
                     recommendations["confidence"] = 0.9
@@ -269,7 +272,7 @@ class CSVSchemaAnalyzer:
                     recommendations["reasoning"] = "Multiple independent files, individual analysis recommended"
             
             # Adjust based on question intent
-            if question_intent.get("requires_joins", False) and len(file_ids) > 1:
+            if question_intent.get("requires_joins", False) and file_count > 1:
                 recommendations["recommended_service"] = "csv_to_sql_converter"
                 recommendations["confidence"] = min(0.95, recommendations["confidence"] + 0.1)
                 recommendations["reasoning"] += " (Question requires cross-file analysis)"

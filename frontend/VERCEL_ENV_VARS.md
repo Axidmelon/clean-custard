@@ -27,3 +27,4 @@ Configure these environment variables in your Vercel dashboard:
 - If not set, the app will default to `/api/v1` (relative path)
 - All environment variables prefixed with `VITE_` are available in the frontend code
 - The build process will embed these values into the production bundle
+

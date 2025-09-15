@@ -37,7 +37,20 @@ class QueryResponse(BaseModel):
     ai_routing: Optional[dict] = None  # AI routing information for CSV queries
 
 
-# --- Helper Function to format the agent's response ---
+# --- Helper Functions ---
+def validate_file_ids(file_ids: List[str]) -> List[str]:
+    """Validate that all file IDs are valid UUIDs."""
+    validated_ids = []
+    for file_id in file_ids:
+        try:
+            # Validate UUID format
+            uuid.UUID(file_id)
+            validated_ids.append(file_id)
+        except ValueError:
+            logger.warning(f"Invalid UUID format: {file_id}")
+            # Skip invalid UUIDs - in production you might want to raise an error
+    return validated_ids
+
 def format_agent_result(result: list) -> str:
     """
     Takes the raw list-of-lists result from the agent and formats it
@@ -94,6 +107,15 @@ async def ask_question(
                     request.file_ids = [request.file_id]
                     request.file_id = None
                 
+                # Validate file IDs are valid UUIDs
+                request.file_ids = validate_file_ids(request.file_ids)
+                
+                if not request.file_ids:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail="No valid file IDs provided. Please ensure all file IDs are valid UUIDs."
+                    )
+                
                 result = await handle_ai_routing(request, db, current_user)
             else:
                 # No CSV file: Go directly to database analysis (no AI routing)
@@ -132,12 +154,17 @@ async def handle_ai_routing(request: QueryRequest, db: Session, current_user) ->
     """
     from services.ai_routing_agent import ai_routing_agent, AnalysisContext
     from db.models import UploadedFile
+    from core.working_memory import working_memory_service
     import logging
+    import uuid
     
     logger = logging.getLogger(__name__)
     
+    # Generate unique request ID for working memory
+    request_id = str(uuid.uuid4())
+    
     try:
-        logger.info(f"🤖 AI Agent processing question: {request.question[:100]}...")
+        logger.info(f"🤖 AI Agent processing question: {request.question[:100]}... (request: {request_id})")
         logger.info(f"📁 Available files: {request.file_ids}")
         
         # Get file information for context
@@ -150,6 +177,9 @@ async def handle_ai_routing(request: QueryRequest, db: Session, current_user) ->
             
             if uploaded_file:
                 file_size = uploaded_file.file_size if hasattr(uploaded_file, 'file_size') else None
+        
+        # Store original file IDs for fallback
+        original_file_ids = request.file_ids.copy()
         
         # Create analysis context
         context = AnalysisContext(
@@ -164,7 +194,8 @@ async def handle_ai_routing(request: QueryRequest, db: Session, current_user) ->
         ai_result = await ai_routing_agent.route_intelligent_multi_file_analysis(
             question=request.question,
             file_ids=request.file_ids,
-            context=context
+            context=context,
+            request_id=request_id
         )
         
         recommended_service = ai_result["recommended_service"]
@@ -184,25 +215,51 @@ async def handle_ai_routing(request: QueryRequest, db: Session, current_user) ->
         # Update request with AI-selected files
         request.file_ids = required_files
         
+        # Final validation - ensure we have at least one file after AI routing
+        if not request.file_ids:
+            logger.error("AI routing returned empty file list, using first available file as fallback")
+            request.file_ids = original_file_ids[:1] if original_file_ids else []
+            
+        if not request.file_ids:
+            raise HTTPException(
+                status_code=400, 
+                detail="No files available for analysis. Please ensure files are uploaded and accessible."
+            )
+        
         # Route to the AI-recommended service with selected files
-        if recommended_service == "data_analysis_service":
-            logger.info("🤖 AI routing to data analysis service (pandas)")
-            return await handle_data_analysis_query(request, db, current_user)
-        elif recommended_service == "csv_to_sql_converter":
-            logger.info("🤖 AI routing to CSV to SQL converter")
-            return await handle_csv_sql_query(request, db, current_user)
-        else:
-            # Fallback to CSV to SQL converter for unknown recommendations
-            logger.warning(f"🤖 Unknown AI recommendation: {recommended_service}, falling back to CSV to SQL converter")
-            return await handle_csv_sql_query(request, db, current_user)
+        try:
+            if recommended_service == "data_analysis_service":
+                logger.info("🤖 AI routing to data analysis service (pandas)")
+                result = await handle_data_analysis_query(request, db, current_user, request_id)
+            elif recommended_service == "csv_to_sql_converter":
+                logger.info("🤖 AI routing to CSV to SQL converter")
+                result = await handle_csv_sql_query(request, db, current_user, request_id)
+            else:
+                # Fallback to CSV to SQL converter for unknown recommendations
+                logger.warning(f"🤖 Unknown AI recommendation: {recommended_service}, falling back to CSV to SQL converter")
+                result = await handle_csv_sql_query(request, db, current_user, request_id)
+            
+            return result
+            
+        finally:
+            # Clean up working memory for this request
+            working_memory_service.cleanup_request(request_id)
+            logger.debug(f"🧠 Cleaned up working memory for request {request_id}")
             
     except Exception as e:
         logger.error(f"🤖 Error in AI routing: {e}")
+        # Clean up working memory even on error
+        try:
+            working_memory_service.cleanup_request(request_id)
+            logger.debug(f"🧠 Cleaned up working memory for request {request_id} (error case)")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to cleanup working memory: {cleanup_error}")
+        
         # Fallback to CSV to SQL converter on error
         logger.info("🤖 Falling back to CSV to SQL converter due to AI routing error")
-        return await handle_csv_sql_query(request, db, current_user)
+        return await handle_csv_sql_query(request, db, current_user, request_id)
 
-async def handle_data_analysis_query(request: QueryRequest, db: Session, current_user) -> QueryResponse:
+async def handle_data_analysis_query(request: QueryRequest, db: Session, current_user, request_id: str = None) -> QueryResponse:
     """
     Handle data analysis queries using the data analysis service with intelligent multi-file support.
     """
@@ -254,12 +311,13 @@ async def handle_data_analysis_query(request: QueryRequest, db: Session, current
         for file_id in file_ids:
             redis_service.track_user_activity(str(current_user.id), file_id)
         
-        # Use intelligent multi-file processing
+        # Use intelligent multi-file processing with working memory integration
         result = await data_analysis_service.process_intelligent_query(
             file_ids=file_ids,
             question=request.question,
             user_id=str(current_user.id),
-            user_preference=request.user_preference
+            user_preference=request.user_preference,
+            request_id=request_id  # Pass request_id for working memory
         )
         
         # Convert to QueryResponse format
@@ -283,7 +341,7 @@ async def handle_data_analysis_query(request: QueryRequest, db: Session, current
         logger.error(f"Unexpected error processing data analysis query for files {file_ids}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process data analysis query: {str(e)}")
 
-async def handle_csv_sql_query(request: QueryRequest, db: Session, current_user) -> QueryResponse:
+async def handle_csv_sql_query(request: QueryRequest, db: Session, current_user, request_id: str = None) -> QueryResponse:
     """
     Handle SQL queries on CSV data using in-memory SQLite.
     Now supports both single-file and multi-file analysis with JOINs.
@@ -352,8 +410,8 @@ async def handle_csv_sql_query(request: QueryRequest, db: Session, current_user)
             if df is None:
                 raise HTTPException(status_code=404, detail="CSV file not found or could not be loaded")
             
-            # Convert CSV to SQLite table with Redis caching
-            table_name = await csv_to_sql_converter.convert_csv_to_sql(file_id, df.to_csv(), str(current_user.id))
+            # Convert CSV to SQLite table with Redis caching and working memory integration
+            table_name = await csv_to_sql_converter.convert_csv_to_sql(file_id, df.to_csv(), str(current_user.id), request_id)
             
             # Get schema information for SQL generation
             schema_info = await csv_to_sql_converter.get_table_schema(file_id)
